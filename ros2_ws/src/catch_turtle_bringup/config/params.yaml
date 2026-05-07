@@ -1,0 +1,43 @@
+spawn_manager:
+  ros__parameters:
+    spawn_period: 3.0
+    x_min: 1.0
+    x_max: 10.0
+    y_min: 1.0
+    y_max: 10.0
+    start_index: 2
+    max_consecutive_failures: 5
+
+master_manager:
+  ros__parameters:
+    master_name: 'turtle1'
+    discover_period: 1.0
+    decision_period: 0.5
+    failure_cooldown_sec: 5.0
+    action_server_wait_sec: 2.0
+    preempt_margin: 1.0
+
+catch_executor:
+  ros__parameters:
+    master_name: 'turtle1'
+    linear_speed: 1.5
+    angular_speed: 3.0
+    max_angular_speed: 4.0
+    catch_distance: 0.5
+    angle_tolerance: 0.1
+    control_rate_hz: 20.0
+    goal_timeout_sec: 30.0
+    no_pose_timeout_sec: 5.0
+    allow_reverse: false
+
+follower_manager:
+  ros__parameters:
+    leader_name: 'turtle1'
+    follow_distance: 0.8
+    linear_speed: 1.2
+    angular_speed: 2.5
+    max_angular_speed: 3.5
+    angle_tolerance: 0.15
+    control_rate_hz: 20.0
+    linear_kp: 1.0
+    angular_kp: 4.0

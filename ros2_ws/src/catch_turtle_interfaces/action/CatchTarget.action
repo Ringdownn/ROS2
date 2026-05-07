@@ -1,0 +1,6 @@
+string target_name
+---
+bool success
+string caught_name
+---
+float32 distance_remaining
