@@ -11,6 +11,16 @@
 
 ## 0. 通用约定
 
+### 0.0 为什么使用完整路径
+
+本文档中多处使用 `~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/<节点名>` 这样的完整路径来启动节点，而非 `ros2 run catch_turtle_bringup <节点名>`。原因如下：
+
+1. **避免 ROS2 daemon 缓存问题**：`ros2 run` 依赖 daemon 缓存的包索引，整批迁移后可能出现"Package not found"或"No executable found"的误报，即使 `colcon build` 已成功。
+2. **绕过 entry_points 注册延迟**：Python 包的 `console_scripts` 入口点有时需要重启 daemon 才能被识别，直接调用安装目录下的可执行文件可立即验证。
+3. **排错更直接**：如果完整路径也报错，说明 build 确实有问题；如果完整路径能跑而 `ros2 run` 不能，说明是环境/缓存问题而非代码问题。
+
+> 验证通过后，阶段 G 的 `ros2 launch` 以及日常使用仍推荐标准 `ros2 run` / `ros2 launch` 方式。
+
 ### 0.1 每个新终端的"开场白"
 
 后面所有"终端 N"的命令前面都默认要先做这两步（之后正文不再重复）：
@@ -183,7 +193,7 @@ ros2 run turtlesim turtlesim_node
 ### 终端 2（生成器）
 
 ```bash
-ros2 run catch_turtle_bringup spawn_manager
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/spawn_manager
 ```
 
 预期：
@@ -211,7 +221,9 @@ ros2 topic list | grep pose
 
 **整体最终效果**：地图上每 3 秒多一只随机位置的海龟，`/turtleN/pose` topic 数量随时间线性增长。
 
-**故障定位提示**：终端 2 报 `ModuleNotFoundError: No module named 'catch_turtle_bringup'` → 这个终端没 source；重新做 0.1 开场白。
+**故障定位提示**：
+- 终端 2 报 `ModuleNotFoundError: No module named 'catch_turtle_bringup'` → 这个终端没 source；重新做 0.1 开场白。
+- 终端 2 报 `No executable found` → 使用完整路径运行：`~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/spawn_manager`
 
 **收尾**：3 个终端逐一 `Ctrl+C` 关闭。turtlesim 窗口会随终端 1 一起退出。
 
@@ -234,7 +246,7 @@ ros2 run turtlesim turtlesim_node
 ### 终端 2（不断产生靶子）
 
 ```bash
-ros2 run catch_turtle_bringup spawn_manager
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/spawn_manager
 ```
 
 预期：每 3 秒打印 `Spawned new turtle: turtleN`，地图上多一只海龟。**等到至少看到 `Spawned new turtle: turtle2` 之后再起终端 4**。
@@ -242,7 +254,7 @@ ros2 run catch_turtle_bringup spawn_manager
 ### 终端 3（Action Server）
 
 ```bash
-ros2 run catch_turtle_bringup catch_executor
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/catch_executor
 ```
 
 预期：启动时打印一行 `catch_executor ready, action: /catch_target`，之后保持安静（直到收到 goal）。
@@ -275,6 +287,7 @@ ros2 action send_goal /catch_target \
 **故障定位提示**：
 
 - 终端 4 长时间停在 `Waiting for an action server to become available...`：去终端 3 看是否打印过 `catch_executor ready`；没打印就是包没 source 或 entry point 缺失，回到阶段 B 重 build。
+- 如果 `ros2 run` 报 `No executable found`，请直接使用完整路径：`~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/<节点名>`
 - `turtle1` 在 turtlesim 里**只转不走**：检查 `params.yaml` 里 `angle_tolerance` 是否被改得过小；或者 `linear_speed` 是否被改成了 0。
 - `turtle1` **走过头来回振荡**：`max_angular_speed` 偏小或 `linear_speed` 偏大；恢复默认值。
 
@@ -295,19 +308,19 @@ ros2 run turtlesim turtlesim_node
 ### 终端 2（生产靶子）
 
 ```bash
-ros2 run catch_turtle_bringup spawn_manager
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/spawn_manager
 ```
 
 ### 终端 3（Action Server）
 
 ```bash
-ros2 run catch_turtle_bringup catch_executor
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/catch_executor
 ```
 
 ### 终端 4（决策大脑）
 
 ```bash
-ros2 run catch_turtle_bringup master_manager
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/master_manager
 ```
 
 预期：
@@ -360,7 +373,7 @@ data: '{"leader": "turtle1", "chain": ["turtle2", "turtle3"]}'
 再额外打开 **第 6 个终端**，开场白后执行：
 
 ```bash
-ros2 run catch_turtle_bringup follower_manager
+~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/follower_manager
 ```
 
 预期：
@@ -447,7 +460,7 @@ ros2 action list
 | --- | --- | --- |
 | `colcon build` 报 `Could not find a package configuration file` | 当前 shell 没 `source /opt/ros/humble/setup.bash` | 先 source 再 build |
 | `colcon build` 通过，但 `ros2 run catch_turtle_bringup ...` 报 `Package not found` | 当前 shell 没 `source install/setup.bash` | 重做 0.1 开场白 |
-| `ros2 run ...` 报 `No executable found` | `setup.py` 的 `entry_points` 没注册或拼写错 | 看 `setup.py` 是否包含对应的 `xxx = catch_turtle_bringup.xxx:main` |
+| `ros2 run ...` 报 `No executable found` | ROS2 daemon 缓存问题或 `setup.py` 的 `entry_points` 没注册 | 使用完整路径运行：`~/ROS2/ros2_ws/install/catch_turtle_bringup/bin/<节点名>`；或检查 `setup.py` 是否包含对应的 `xxx = catch_turtle_bringup.xxx:main` |
 | `turtlesim_node` 启动闪退、终端无错或 `Cannot open display` | `$DISPLAY` 为空 | 在 VM 桌面终端跑，或 `ssh -X` |
 | 终端 4 的 `send_goal` 一直 `Waiting for action server` | 终端 3 的 `catch_executor` 没起 / 没 source | 检查终端 3 |
 | `turtle1` 抓到一只之后不再动 | `master_manager` 已退出 / 抢占逻辑卡死 | `ros2 node list` 看 master_manager 在不在；不在就重启 |
