@@ -22,6 +22,9 @@ import threading
 import time
 from typing import Optional
 
+from rclpy.clock import Clock
+from rclpy.duration import Duration
+
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -101,7 +104,7 @@ class CatchExecutorNode(Node):
             self._busy = False
 
     def _on_goal(self, _goal_request) -> GoalResponse:
-        if self._busy:
+        if not self._try_acquire_busy():
             self.get_logger().warn('Rejecting new goal: another catch is in progress')
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
@@ -117,15 +120,7 @@ class CatchExecutorNode(Node):
         target_name: str = goal_handle.request.target_name
         self.get_logger().info(f'Catch goal received: {target_name}')
 
-        if not self._try_acquire_busy():
-            self.get_logger().warn(
-                f'Race detected, aborting goal {target_name}'
-            )
-            goal_handle.abort()
-            result = CatchTarget.Result()
-            result.success = False
-            result.caught_name = ''
-            return result
+        # Busy flag was already acquired in _on_goal to prevent race conditions
 
         with self._target_lock:
             self._target_pose = None
@@ -146,15 +141,24 @@ class CatchExecutorNode(Node):
         no_pose_timeout_sec = float(self.get_parameter('no_pose_timeout_sec').value)
         allow_reverse = bool(self.get_parameter('allow_reverse').value)
 
+        clock = Clock()
+        rate = self.create_rate(rate_hz, clock)
+
         result = CatchTarget.Result()
         result.success = False
         result.caught_name = ''
 
         start_time = time.monotonic()
-        first_pose_time: Optional[float] = None
+        last_pose_time: Optional[float] = None
 
         try:
             while rclpy.ok():
+                if not goal_handle.is_active:
+                    self.get_logger().warn(
+                        f'Goal {target_name} no longer active, aborting',
+                    )
+                    return result
+
                 if goal_handle.is_cancel_requested:
                     self._publish_zero()
                     goal_handle.canceled()
@@ -175,19 +179,25 @@ class CatchExecutorNode(Node):
                 master_pose = self._master_pose
 
                 if target_pose is None or master_pose is None:
-                    if first_pose_time is None and now - start_time > no_pose_timeout_sec:
+                    if last_pose_time is None and now - start_time > no_pose_timeout_sec:
                         self._publish_zero()
                         goal_handle.abort()
                         self.get_logger().warn(
                             f'Goal {target_name} aborted: no pose received',
                         )
                         return result
+                    if last_pose_time is not None and now - last_pose_time > no_pose_timeout_sec:
+                        self._publish_zero()
+                        goal_handle.abort()
+                        self.get_logger().warn(
+                            f'Goal {target_name} aborted: pose lost for too long',
+                        )
+                        return result
                     self._publish_zero()
-                    time.sleep(period)
+                    rate.sleep()
                     continue
 
-                if first_pose_time is None:
-                    first_pose_time = now
+                last_pose_time = now
 
                 dx = target_pose.x - master_pose.x
                 dy = target_pose.y - master_pose.y
@@ -208,6 +218,10 @@ class CatchExecutorNode(Node):
                         goal_handle.succeed()
                     except Exception as e:
                         self.get_logger().warn(f'Failed to send success result: {e}')
+                        try:
+                            goal_handle.abort()
+                        except Exception:
+                            pass
                     self.get_logger().info(f'Caught {target_name}!')
                     return result
 
@@ -245,12 +259,14 @@ class CatchExecutorNode(Node):
                     )
                 self._cmd_pub.publish(twist)
 
-                time.sleep(period)
+                rate.sleep()
         finally:
-            try:
-                self.destroy_subscription(target_sub)
-            except Exception:
-                pass
+            target_sub = locals().get('target_sub')
+            if target_sub is not None:
+                try:
+                    self.destroy_subscription(target_sub)
+                except Exception as e:
+                    self.get_logger().debug(f'Error destroying subscription: {e}')
             self._publish_zero()
             self._release_busy()
 
