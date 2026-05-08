@@ -17,7 +17,7 @@
 
 ### 0.1 包和命名
 
-- 工作区：`~/ros2_ws`
+- 工作区：`~/ROS2/ros2_ws`
 - 接口包：`catch_turtle_interfaces`（`ament_cmake`）
 - 主功能包：`catch_turtle_bringup`（`ament_python`）
 - 主海龟名：`turtle1`
@@ -41,7 +41,23 @@
 - `master_manager` 同样必须用 `MultiThreadedExecutor`，否则 Action 回调和定时器决策可能互相阻塞。
 - 其它节点单线程即可。
 
-### 0.4 稳定性硬性约束（避免长期跑坏）
+### 0.4 每个新终端的"开场白"（所有验证步骤的统一前置）
+
+后面所有的"验证步骤"里，凡是新开一个终端、需要跑 `ros2 ...` 命令的，**第一件事永远是这两行**（之后正文不再重复，只写实际要跑的命令）：
+
+```bash
+cd ~/ROS2/ros2_ws
+source install/setup.bash
+```
+
+说明：
+
+- 第一行确保工作目录是工作区根目录；`colcon build` 必须在这里执行。
+- 第二行把刚编译出来的本地包（`catch_turtle_interfaces`、`catch_turtle_bringup`）注入当前 shell，否则 `ros2 run catch_turtle_bringup ...` 会报 "Package not found"。
+- 假设 `~/.bashrc` 里已经 `source /opt/ros/humble/setup.bash`（按 `ubuntu_ros2_catch_turtle_guide.md` 的环境约定）；如果没有，先手动 `source /opt/ros/humble/setup.bash` 再执行上面两行。
+- 一个终端开过场白后会一直生效，**不要中途 `exit` 又新开**而忘了再 source。
+
+### 0.5 稳定性硬性约束（避免长期跑坏）
 
 - `catch_executor` 必须执行**单 goal 串行化**：忙时收到新 goal 直接 `REJECT`，避免两套控制律同时往 `turtle1/cmd_vel` 发指令。**抢占由 `master_manager` 主动 cancel 旧 goal 实现**，而不是塞两个 goal 进去。
 - `master_manager` 抢占必须带**滞回**（`preempt_margin`，默认 1.0 m）：新最近目标距离 + margin < 当前目标距离 才换，避免两个目标距离接近时来回切换。
@@ -54,9 +70,11 @@
 
 ### 1.1 命令
 
+在**任意一个新终端**里依次执行（这一步是从零搭骨架，无需先 `source install/setup.bash`，因为还没编译过）：
+
 ```bash
-mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws/src
+mkdir -p ~/ROS2/ros2_ws/src
+cd ~/ROS2/ros2_ws/src
 
 ros2 pkg create catch_turtle_interfaces --build-type ament_cmake \
   --dependencies action_msgs
@@ -64,6 +82,8 @@ ros2 pkg create catch_turtle_interfaces --build-type ament_cmake \
 ros2 pkg create catch_turtle_bringup --build-type ament_python \
   --dependencies rclpy std_msgs geometry_msgs turtlesim catch_turtle_interfaces
 ```
+
+预期：`~/ROS2/ros2_ws/src/` 下出现 `catch_turtle_interfaces/` 和 `catch_turtle_bringup/` 两个目录，每个目录里至少有 `package.xml`、`CMakeLists.txt` 或 `setup.py`。
 
 ### 1.2 最终目录
 
@@ -95,12 +115,30 @@ src/
 
 ### 1.3 验证
 
+**前置**：1.1 的两个 `ros2 pkg create` 已成功执行。本节只需要**一个终端**。
+
+**终端 A（同一个终端，从头到尾）**：
+
 ```bash
-cd ~/ros2_ws
+cd ~/ROS2/ros2_ws
 colcon build
 source install/setup.bash
 ros2 pkg list | grep catch_turtle
 ```
+
+每条命令的预期效果：
+
+- `cd ~/ROS2/ros2_ws`：当前路径变成工作区根目录，`ls` 应能看到 `src/`。
+- `colcon build`：屏幕滚出 `Starting >>> catch_turtle_interfaces` / `Starting >>> catch_turtle_bringup`，最终出现 `Summary: 2 packages finished`，工作区里多出 `build/`、`install/`、`log/` 三个目录，**没有红色 ERROR**。
+- `source install/setup.bash`：无输出，环境变量被注入（之后 `ros2 pkg list` 能看到本地包）。
+- `ros2 pkg list | grep catch_turtle`：屏幕上**恰好打印两行**：
+
+  ```text
+  catch_turtle_bringup
+  catch_turtle_interfaces
+  ```
+
+最终效果：工作区可编译、本地包可被 `ros2` 命令发现，骨架阶段通过。
 
 ## 2. 阶段 1：定义自定义 Action 接口
 
@@ -166,12 +204,33 @@ ament_package()
 
 ### 2.4 验证
 
+**前置**：2.1 / 2.2 / 2.3 三个文件已经写好并保存。本节只需要**一个终端**。
+
+**终端 A**：
+
 ```bash
-cd ~/ros2_ws
+cd ~/ROS2/ros2_ws
 colcon build --packages-select catch_turtle_interfaces
 source install/setup.bash
 ros2 interface show catch_turtle_interfaces/action/CatchTarget
 ```
+
+每条命令的预期效果：
+
+- `colcon build --packages-select catch_turtle_interfaces`：只编译接口包，结尾出现 `Summary: 1 package finished`，无红色 ERROR；`install/catch_turtle_interfaces/` 下生成 Python/C++ 绑定。
+- `source install/setup.bash`：无输出，新接口生效。
+- `ros2 interface show catch_turtle_interfaces/action/CatchTarget`：屏幕原样打印 `.action` 文件的三段，**两条 `---` 分隔线**：
+
+  ```text
+  string target_name
+  ---
+  bool success
+  string caught_name
+  ---
+  float32 distance_remaining
+  ```
+
+最终效果：自定义 action 接口可被全系统使用，后续节点可以 `from catch_turtle_interfaces.action import CatchTarget`。
 
 ## 3. 阶段 2：工具模块
 
@@ -438,15 +497,61 @@ if __name__ == '__main__':
     main()
 ```
 
-### 4.2 验证（先把 `setup.py` 的 entry point 加上，见第 11 节，再编译）
+### 4.2 验证（先把 `setup.py` 的 entry point 加上，见第 10 节，再编译）
+
+**前置**：
+
+1. 第 10 节的 `setup.py` 已经写好（至少注册了 `spawn_manager` 这个 entry point）。
+2. 在**任意一个终端**先执行一次编译：
+
+   ```bash
+   cd ~/ROS2/ros2_ws
+   colcon build --packages-select catch_turtle_bringup
+   source install/setup.bash
+   ```
+
+   预期：`Summary: 1 package finished`，无 ERROR。
+
+接下来同时打开 **3 个终端**，每个终端开头都要先按 0.4 节做"开场白"（`cd ~/ROS2/ros2_ws && source install/setup.bash`），然后按下面顺序启动：
+
+**终端 1（仿真器，必须最先起）**：
 
 ```bash
-ros2 run turtlesim turtlesim_node                  # 终端 1
-ros2 run catch_turtle_bringup spawn_manager        # 终端 2
-ros2 topic list | grep pose                        # 终端 3
+ros2 run turtlesim turtlesim_node
 ```
 
-预期：每 3 秒地图上多一只海龟，`/turtle2/pose`、`/turtle3/pose`… 持续增加。
+预期：弹出蓝底 turtlesim 窗口，正中间是 `turtle1`；终端打印 `Spawning turtle [turtle1] at x=[5.5], y=[5.5], theta=[0.0]`，之后没有持续刷屏。
+
+**终端 2（生成器）**：
+
+```bash
+ros2 run catch_turtle_bringup spawn_manager
+```
+
+预期：
+
+- 终端先打印一行 `spawn_manager up; period=3.00s; first_name=turtle2`。
+- 之后每 3 秒打印一行 `Spawned new turtle: turtleN`（N 从 2 开始递增）。
+- 同时**终端 1 的 turtlesim 窗口**里每 3 秒出现一只新海龟（位置随机）。
+
+**终端 3（观察 topic）**：等终端 2 已经至少 spawn 出 1~2 只海龟之后再执行：
+
+```bash
+ros2 topic list | grep pose
+```
+
+预期：列表里至少包含
+
+```text
+/turtle1/pose
+/turtle2/pose
+```
+
+只要终端 2 还在跑，过几秒再执行一次同样的命令，列表会变长（出现 `/turtle3/pose`、`/turtle4/pose`…）。
+
+**整体最终效果**：地图上每 3 秒多一只随机位置的海龟，`/turtleN/pose` topic 数量随时间线性增长；终端 2 长期运行不报红色 ERROR。
+
+**收尾**：调试完后在每个终端按 `Ctrl+C` 关闭节点；turtlesim 窗口会随终端 1 退出而关闭。
 
 ## 5. 阶段 4：`catch_executor`（Action Server：单 goal 串行 + 超时 + 多线程执行器）
 
@@ -727,17 +832,73 @@ if __name__ == '__main__':
 
 ### 5.2 验证
 
+**前置**：
+
+1. 第 10 节 `setup.py` 已经把 `catch_executor` 的 entry point 也注册好。
+2. 在任意一个终端先编译一次：
+
+   ```bash
+   cd ~/ROS2/ros2_ws
+   colcon build --packages-select catch_turtle_bringup
+   source install/setup.bash
+   ```
+
+   预期：`Summary: 1 package finished`，无 ERROR。
+
+接下来同时打开 **4 个终端**，每个终端开头都按 0.4 节做"开场白"，然后按以下顺序启动：
+
+**终端 1（仿真器）**：
+
 ```bash
-ros2 run turtlesim turtlesim_node                       # 终端 1
-ros2 run catch_turtle_bringup spawn_manager             # 终端 2
-ros2 run catch_turtle_bringup catch_executor            # 终端 3
-# 等地图上出现 turtle2 后
-ros2 action send_goal /catch_target \
-  catch_turtle_interfaces/action/CatchTarget \
-  "{target_name: 'turtle2'}" --feedback                 # 终端 4
+ros2 run turtlesim turtlesim_node
 ```
 
-预期：feedback 中的 `distance_remaining` 持续减小，最终返回 `success: true, caught_name: turtle2`。
+预期：turtlesim 窗口弹出，`turtle1` 在正中央。
+
+**终端 2（不断产生靶子）**：
+
+```bash
+ros2 run catch_turtle_bringup spawn_manager
+```
+
+预期：每 3 秒打印 `Spawned new turtle: turtleN`，地图上多一只海龟。**等到至少看到 `Spawned new turtle: turtle2` 之后再起终端 4**。
+
+**终端 3（Action Server）**：
+
+```bash
+ros2 run catch_turtle_bringup catch_executor
+```
+
+预期：终端启动时打印一行 `catch_executor ready, action: /catch_target`，之后保持安静（直到收到 goal）。
+
+**终端 4（手动下发一次抓捕 goal，作为客户端）**：
+
+```bash
+ros2 action send_goal /catch_target \
+  catch_turtle_interfaces/action/CatchTarget \
+  "{target_name: 'turtle2'}" --feedback
+```
+
+预期：
+
+- 终端 4 立刻打印 `Waiting for an action server to become available...`，随后 `Sending goal:` + `Goal accepted with ID: ...`。
+- 之后**每秒大约 20 行** `Feedback: distance_remaining: <数字>`，数字单调下降（中间偶有小抖动正常）。
+- 同时**终端 1 的 turtlesim 窗口**里能肉眼看见 `turtle1` 朝 `turtle2` 移动（先转向、再前进）。
+- 当距离首次小于 0.5（`catch_distance` 默认值）时，终端 4 打印：
+
+  ```text
+  Result:
+    success: True
+    caught_name: 'turtle2'
+  Goal finished with status: SUCCEEDED
+  ```
+
+  并退出。
+- 终端 3 在收到 goal 时打印 `Catch goal received: turtle2`，结束时打印 `Caught turtle2!`。
+
+**整体最终效果**：单次抓捕闭环跑通——客户端发 goal、服务端控制 turtle1 追上 turtle2、双方都收到 success。
+
+**收尾**：终端 1/2/3 按 `Ctrl+C` 关闭。
 
 ## 6. 阶段 5：`master_manager`
 
@@ -1029,15 +1190,81 @@ if __name__ == '__main__':
 
 ### 6.2 验证
 
+**前置**：
+
+1. 第 10 节 `setup.py` 已经把 `master_manager` 的 entry point 也注册好。
+2. 编译一次：
+
+   ```bash
+   cd ~/ROS2/ros2_ws
+   colcon build --packages-select catch_turtle_bringup
+   source install/setup.bash
+   ```
+
+   预期：`Summary: 1 package finished`，无 ERROR。
+
+接下来同时打开 **5 个终端**，每个终端开头都按 0.4 节做"开场白"，然后按以下顺序启动（顺序很重要：仿真器最先，master 最后）：
+
+**终端 1（仿真器）**：
+
 ```bash
-ros2 run turtlesim turtlesim_node                  # 终端 1
-ros2 run catch_turtle_bringup spawn_manager        # 终端 2
-ros2 run catch_turtle_bringup catch_executor       # 终端 3
-ros2 run catch_turtle_bringup master_manager       # 终端 4
-ros2 topic echo /caught_chain                      # 终端 5
+ros2 run turtlesim turtlesim_node
 ```
 
-预期：`turtle1` 自动一只接一只地抓海龟，`/caught_chain` 每抓到一只就更新一次。
+预期：turtlesim 窗口出现，`turtle1` 在中央。
+
+**终端 2（生产靶子）**：
+
+```bash
+ros2 run catch_turtle_bringup spawn_manager
+```
+
+预期：每 3 秒打印 `Spawned new turtle: turtleN`，地图上多一只海龟。
+
+**终端 3（Action Server）**：
+
+```bash
+ros2 run catch_turtle_bringup catch_executor
+```
+
+预期：打印 `catch_executor ready, action: /catch_target`，安静等待 goal。
+
+**终端 4（决策大脑）**：
+
+```bash
+ros2 run catch_turtle_bringup master_manager
+```
+
+预期：
+
+- 启动时打印 `master_manager up`、`Tracking pose of turtle1`。
+- 每发现一只新海龟就追加一行 `Tracking pose of turtleN`。
+- 反复打印 `Dispatching catch goal: turtleN` → 不久后 `Chain updated -> ['turtle2']`、`['turtle2', 'turtle3']`…
+
+**终端 5（监听链条 topic）**：
+
+```bash
+ros2 topic echo /caught_chain
+```
+
+预期：每抓到一只海龟就打印一次 JSON 字符串，例如：
+
+```text
+data: '{"leader": "turtle1", "chain": ["turtle2"]}'
+---
+data: '{"leader": "turtle1", "chain": ["turtle2", "turtle3"]}'
+---
+```
+
+`chain` 数组**只增不减**，永远不会出现重复名字。
+
+**整体最终效果**：
+
+- turtlesim 窗口里 `turtle1` 自动选最近的未抓海龟一只一只追，到达 0.5 距离内就"抓住"（停下并切下一个目标，被抓的那只此后保持原地不动）。
+- 终端 4 的日志里看不到红色 ERROR；偶尔会有 `Preempting turtleA -> turtleB` 这种切换日志，那是滞回抢占在工作，属于正常。
+- 持续运行 1 分钟以上不会卡死、不会反复抓同一只。
+
+**收尾**：5 个终端逐一 `Ctrl+C` 关闭。
 
 ## 7. 阶段 6：`follower_manager`
 
@@ -1200,13 +1427,38 @@ if __name__ == '__main__':
 
 ### 7.2 验证
 
-接着上一阶段，再开一个终端：
+**前置**：
+
+1. 第 10 节 `setup.py` 已经把 `follower_manager` 的 entry point 也注册好。
+2. 编译一次：
+
+   ```bash
+   cd ~/ROS2/ros2_ws
+   colcon build --packages-select catch_turtle_bringup
+   source install/setup.bash
+   ```
+
+   预期：`Summary: 1 package finished`，无 ERROR。
+3. **保持 6.2 节里 5 个终端继续运行**（turtlesim、spawn_manager、catch_executor、master_manager、`ros2 topic echo /caught_chain`），不要关。
+
+再额外打开 **第 6 个终端**，开场白后执行：
+
+**终端 6（跟随控制器）**：
 
 ```bash
 ros2 run catch_turtle_bringup follower_manager
 ```
 
-预期：每抓到一只海龟，它就尾随队尾，逐渐形成龟队。
+预期：
+
+- 终端 6 启动时打印 `follower_manager up`，之后**几乎不再刷屏**（控制循环不打日志）。
+- turtlesim 窗口里：每当 `turtle1` 抓到一只新海龟（终端 5 的 `chain` 增长一个名字），那只新海龟就**立刻开始尾随队尾**——先转向、再前进，最终保持约 0.8（`follow_distance`）的间距。
+- `turtle1` 继续追下一只时，整条队伍像贪吃蛇一样跟着 `turtle1` 走。
+- 队尾不会撞到队首，不会原地高频抖动。
+
+**整体最终效果**：龟队随时间自动加长，链条 = 抓捕顺序，且每只都在跟前一只。
+
+**收尾**：6 个终端逐一 `Ctrl+C` 关闭。
 
 ## 8. 阶段 7：`params.yaml`
 
@@ -1318,14 +1570,68 @@ def generate_launch_description() -> LaunchDescription:
 
 ### 9.2 验证
 
+**前置**：
+
+- 前面所有源码（接口、四个 Python 节点、`params.yaml`、`launch/catch_turtle.launch.py`、第 10 节的 `setup.py`/`package.xml`）都已经写好并保存。
+- 把第 6.2 / 7.2 节遗留的所有终端都关闭（`Ctrl+C`），避免节点重名冲突。
+
+本节用 **2 个终端**就够。
+
+**终端 A（编译 + 一键起整套系统）**：
+
 ```bash
-cd ~/ros2_ws
+cd ~/ROS2/ros2_ws
 colcon build
 source install/setup.bash
 ros2 launch catch_turtle_bringup catch_turtle.launch.py
 ```
 
-预期：一次性启动 `turtlesim` 与四个自定义节点；海龟生成、被抓、加入跟随链，全程无需手动干预。
+每条命令的预期效果：
+
+- `colcon build`：两个包都被编译，`Summary: 2 packages finished`，无 ERROR。
+- `source install/setup.bash`：无输出。
+- `ros2 launch ...`：屏幕开始混合打印 5 个节点的日志（每行前面带 `[turtlesim_node-1]` / `[spawn_manager-2]` / `[catch_executor-3]` / `[master_manager-4]` / `[follower_manager-5]` 前缀），其中能看到：
+  - `[turtlesim_node-1] Spawning turtle [turtle1] ...`
+  - `[catch_executor-3] catch_executor ready, action: /catch_target`
+  - `[master_manager-4] master_manager up`
+  - `[spawn_manager-2] Spawned new turtle: turtle2` ……
+  - `[master_manager-4] Chain updated -> ['turtle2']` ……
+- 同时弹出 turtlesim 窗口，`turtle1` 开始自动追、抓、带队。
+
+**终端 B（旁路检查，不改变系统状态）**：等终端 A 已经稳定运行 10 秒后，依次执行下面三条独立命令查看：
+
+```bash
+ros2 node list
+ros2 topic list
+ros2 action list
+```
+
+每条命令的预期效果：
+
+- `ros2 node list`：至少包含
+
+  ```text
+  /catch_executor
+  /follower_manager
+  /master_manager
+  /spawn_manager
+  /turtlesim_node
+  ```
+
+- `ros2 topic list`：包含 `/caught_chain`、`/turtle1/cmd_vel`、`/turtle1/pose`、`/turtle2/pose`、`/turtle3/pose` 等（数量随时间增加）。
+- `ros2 action list`：恰好出现一行
+
+  ```text
+  /catch_target
+  ```
+
+**整体最终效果**：
+
+- 一句 `ros2 launch` 启动整套系统，无需手动 `ros2 run` 五次。
+- turtlesim 窗口里每 3 秒多一只海龟，`turtle1` 自动追最近未抓的，抓到后那只立刻入队尾随。
+- 终端 A 持续运行 ≥ 3 分钟不崩、不卡死、不重复抓同一只（与第 13 节验收标准一致）。
+
+**收尾**：在终端 A 按 `Ctrl+C`，5 个节点会一起退出，turtlesim 窗口关闭。
 
 ## 10. `setup.py` 与 `package.xml`
 
@@ -1406,7 +1712,7 @@ setup(
 
 ## 11. 编码总顺序（按文件粒度）
 
-每写完一项就 `cd ~/ros2_ws && colcon build && source install/setup.bash`，再跑该步骤的"验证"。
+每写完一项就 `cd ~/ROS2/ros2_ws && colcon build && source install/setup.bash`，再跑该步骤的"验证"。
 
 1. 创建 `catch_turtle_interfaces` 和 `catch_turtle_bringup` 两个空包（第 1 节）
 2. 写 `CatchTarget.action` + `CMakeLists.txt` + `package.xml`（第 2 节）
