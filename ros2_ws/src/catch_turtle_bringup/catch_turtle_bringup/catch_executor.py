@@ -195,13 +195,19 @@ class CatchExecutorNode(Node):
 
                 feedback = CatchTarget.Feedback()
                 feedback.distance_remaining = float(dist)
-                goal_handle.publish_feedback(feedback)
+                try:
+                    goal_handle.publish_feedback(feedback)
+                except Exception as e:
+                    self.get_logger().warn(f'Failed to publish feedback: {e}')
 
                 if dist < catch_distance:
                     self._publish_zero()
                     result.success = True
                     result.caught_name = target_name
-                    goal_handle.succeed()
+                    try:
+                        goal_handle.succeed()
+                    except Exception as e:
+                        self.get_logger().warn(f'Failed to send success result: {e}')
                     self.get_logger().info(f'Caught {target_name}!')
                     return result
 
@@ -241,7 +247,10 @@ class CatchExecutorNode(Node):
 
                 time.sleep(period)
         finally:
-            self.destroy_subscription(target_sub)
+            try:
+                self.destroy_subscription(target_sub)
+            except Exception:
+                pass
             self._publish_zero()
             self._release_busy()
 
