@@ -20,14 +20,14 @@ class FollowerManagerNode(Node):
         super().__init__('follower_manager')
 
         self.declare_parameter('leader_name', 'turtle1')
-        self.declare_parameter('follow_distance', 0.8)
-        self.declare_parameter('linear_speed', 1.2)
-        self.declare_parameter('angular_speed', 2.5)
-        self.declare_parameter('max_angular_speed', 3.5)
-        self.declare_parameter('angle_tolerance', 0.15)
+        self.declare_parameter('follow_distance', 0.5)
+        self.declare_parameter('linear_speed', 2.0)
+        self.declare_parameter('angular_speed', 3.0)
+        self.declare_parameter('max_angular_speed', 4.0)
+        self.declare_parameter('angle_tolerance', 0.1)
         self.declare_parameter('control_rate_hz', 20.0)
-        self.declare_parameter('linear_kp', 1.0)
-        self.declare_parameter('angular_kp', 4.0)
+        self.declare_parameter('linear_kp', 2.0)
+        self.declare_parameter('angular_kp', 3.0)
 
         self._leader_name: str = str(self.get_parameter('leader_name').value)
         self._chain: List[str] = []
@@ -110,29 +110,37 @@ class FollowerManagerNode(Node):
             dist = utils.distance(f_pose.x, f_pose.y, l_pose.x, l_pose.y)
             twist = Twist()
 
-            if dist < follow_distance:
-                pub.publish(twist)
-                continue
-
+            # 计算目标角度（朝向领导者）
             target_angle = utils.angle_to(
                 f_pose.x, f_pose.y, l_pose.x, l_pose.y,
             )
             angle_err = utils.normalize_angle(target_angle - f_pose.theta)
 
+            # 如果距离太近，后退或停止
+            if dist < follow_distance * 0.5:
+                if abs(angle_err) < angle_tolerance:
+                    twist.linear.x = -linear_speed * 0.3
+                else:
+                    twist.angular.z = utils.clamp(
+                        angular_kp * angle_err,
+                        -max_angular_speed, max_angular_speed,
+                    )
+                pub.publish(twist)
+                continue
+
+            # 正常跟随：同时转向和前进
+            # 角度控制
             if abs(angle_err) > angle_tolerance:
-                twist.angular.z = utils.clamp(
-                    angular_speed * utils.sign(angle_err),
-                    -max_angular_speed, max_angular_speed,
-                )
-            else:
-                twist.linear.x = utils.clamp(
-                    linear_kp * (dist - follow_distance),
-                    0.0, linear_speed,
-                )
                 twist.angular.z = utils.clamp(
                     angular_kp * angle_err,
                     -max_angular_speed, max_angular_speed,
                 )
+            
+            # 速度控制：根据距离调整
+            if dist > follow_distance:
+                speed = linear_kp * (dist - follow_distance)
+                twist.linear.x = utils.clamp(speed, 0.0, linear_speed)
+            
             pub.publish(twist)
 
 

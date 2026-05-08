@@ -20,7 +20,7 @@ master_manager:
 catch_executor:
   ros__parameters:
     master_name: 'turtle1'
-    linear_speed: 1.5
+    linear_speed: 2.0
     angular_speed: 3.0
     max_angular_speed: 4.0
     catch_distance: 0.5
@@ -33,11 +33,11 @@ catch_executor:
 follower_manager:
   ros__parameters:
     leader_name: 'turtle1'
-    follow_distance: 0.8
-    linear_speed: 1.2
-    angular_speed: 2.5
-    max_angular_speed: 3.5
-    angle_tolerance: 0.15
+    follow_distance: 0.5
+    linear_speed: 2.0
+    angular_speed: 3.0
+    max_angular_speed: 4.0
+    angle_tolerance: 0.1
     control_rate_hz: 20.0
-    linear_kp: 1.0
-    angular_kp: 4.0
+    linear_kp: 2.0
+    angular_kp: 3.0
