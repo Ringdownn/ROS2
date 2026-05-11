@@ -1,20 +1,3 @@
-"""Brain of the system: discover turtles, pick the nearest, dispatch catch goals.
-
-Stability features:
-- Per-target failure cooldown: if catch_executor reports failure / abort /
-  rejection for a turtle, that turtle is excluded from the candidate set for
-  `failure_cooldown_sec` seconds, so we don't lock onto a broken target.
-- Auto-discovery: scans `/turtleN/pose` topics each tick, so newly spawned
-  turtles are picked up without any explicit hand-off.
-
-Dynamic decision:
-- Even while a catch goal is in flight, every `decision_period` we re-pick the
-  nearest uncaught turtle. If it is closer than the current target by more
-  than `preempt_margin` meters, we cancel the current goal (preemption) and
-  let the next decision tick dispatch the closer one. The hysteresis prevents
-  flip-flopping between two near-equidistant targets.
-"""
-
 from __future__ import annotations
 
 import json
@@ -177,7 +160,6 @@ class MasterManagerNode(Node):
         cancel_future.add_done_callback(self._on_cancel_done)
 
     def _on_cancel_done(self, _future) -> None:
-        # The result callback will fire shortly after; bookkeeping is done there.
         pass
 
     def _send_goal(self, target_name: str) -> None:

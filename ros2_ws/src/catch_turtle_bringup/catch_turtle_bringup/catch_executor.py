@@ -1,20 +1,3 @@
-"""Action server that drives turtle1 to catch a target turtle.
-
-Stability features:
-- Single-goal serialization: while one goal is executing, any new goal is
-  REJECTED so two control loops never fight for /turtle1/cmd_vel.
-- Hard timeouts: every goal has a total timeout and a "no pose received"
-  timeout, after which it is aborted with success=False.
-- MultiThreadedExecutor + ReentrantCallbackGroup, so the long-running
-  execute callback never blocks pose subscriptions.
-
-Motion:
-- Action set = {forward, backward, turn-left, turn-right}. Each control tick
-  evaluates whether facing the target (forward) or the opposite direction
-  (backward) yields the smaller heading error, and drives in that direction.
-  When `allow_reverse` is False the controller falls back to forward-only.
-"""
-
 from __future__ import annotations
 
 import math
@@ -119,8 +102,6 @@ class CatchExecutorNode(Node):
     def _execute(self, goal_handle) -> CatchTarget.Result:
         target_name: str = goal_handle.request.target_name
         self.get_logger().info(f'Catch goal received: {target_name}')
-
-        # Busy flag was already acquired in _on_goal to prevent race conditions
 
         with self._target_lock:
             self._target_pose = None

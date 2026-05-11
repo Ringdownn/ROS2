@@ -1,0 +1,37 @@
+\chapter{Introduction\label{chap:introduction}}
+
+\section{Project Overview}
+
+The \textbf{Catch Turtle All} project is a ROS2-based robotic simulation system that demonstrates autonomous pursuit, task scheduling, and formation following within the \texttt{turtlesim} environment. Built on ROS2 Humble with Python, the system orchestrates multiple cooperating nodes to create a dynamic, self-sustaining multi-agent scenario.
+
+The core concept is straightforward: a master turtle (\texttt{turtle1}) continuously hunts newly spawned target turtles across the simulation canvas. Once a target is caught, it joins a following chain behind the master, forming an ever-growing snake-like formation. New targets are generated periodically, ensuring the system never runs out of objectives.
+
+\section{Project Objectives}
+
+The project is designed to achieve the following objectives:
+
+\begin{enumerate}[label=\textbf{O\arabic*:}]
+  \item \textbf{Autonomous Target Discovery and Pursuit}: The master turtle must autonomously discover all available targets, select the nearest one, and physically pursue it without human intervention.
+
+  \item \textbf{Action-Based Task Execution}: The pursuit of each target is implemented as a ROS2 Action, demonstrating goal dispatch, real-time feedback, result handling, and cancellation semantics.
+
+  \item \textbf{Dynamic Environment Generation}: New target turtles are spawned continuously at random positions, creating an ever-changing environment that tests the system's adaptability.
+
+  \item \textbf{Chain Formation Following}: After being caught, each target turtle joins a chain formation, following its predecessor to create a coordinated multi-turtle formation.
+
+  \item \textbf{Robust System Design}: The system must handle edge cases gracefully---such as target preemption, goal failures, and spawn rejections---to run reliably over extended periods.
+\end{enumerate}
+
+\section{System at a Glance}
+
+The system consists of five ROS2 nodes organised in a layered architecture:
+
+\begin{itemize}
+  \item \textbf{Simulation Layer}: \texttt{turtlesim\_node} provides the visual environment.
+  \item \textbf{Environment Generation Layer}: \texttt{spawn\_manager} periodically creates new turtles.
+  \item \textbf{Task Management Layer}: \texttt{master\_manager} selects targets and dispatches pursuit tasks.
+  \item \textbf{Execution Control Layer}: \texttt{catch\_executor} physically drives the master turtle toward targets.
+  \item \textbf{Formation Following Layer}: \texttt{follower\_manager} maintains the chain of caught turtles.
+\end{itemize}
+
+The operational loop is: \textit{spawn targets} $\rightarrow$ \textit{discover and track} $\rightarrow$ \textit{select nearest} $\rightarrow$ \textit{pursue via Action} $\rightarrow$ \textit{catch and add to chain} $\rightarrow$ \textit{repeat}.

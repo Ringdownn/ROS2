@@ -1,0 +1,53 @@
+\chapter{Robustness Design\label{chap:robustness}}
+
+A key contribution of this project is its emphasis on long-running stability. Unlike simple demonstration systems that work correctly for a few seconds, the Catch Turtle All system is designed to run indefinitely without degradation. This chapter describes the robustness mechanisms that make this possible.
+
+\section{Robustness Mechanisms}
+
+Table~\ref{tab:robustness} summarises the eight robustness mechanisms implemented across the system.
+
+\begin{table}[htbp]
+\centering
+\caption{Robustness Mechanisms}
+\label{tab:robustness}
+\begin{tabular}{p{3.5cm}p{3.5cm}p{6cm}}
+\toprule
+\textbf{Mechanism} & \textbf{Node} & \textbf{Purpose} \\
+\midrule
+Single-goal serialization & \texttt{catch\_executor} & Prevents conflicting velocity commands from multiple concurrent goals \\
+Preemption with hysteresis & \texttt{master\_manager} & Avoids flip-flopping between nearly equidistant targets \\
+Failure cooldown & \texttt{master\_manager} & Prevents pathological retry loops on problematic targets \\
+Duplicate name handling & \texttt{spawn\_manager} & Automatically skips indices on spawn rejection \\
+Startup index scanning & \texttt{spawn\_manager} & Prevents name collisions after node restart \\
+Goal timeout & \texttt{catch\_executor} & Prevents stuck goals from blocking the system indefinitely \\
+No-pose timeout & \texttt{catch\_executor} & Detects missing pose data and aborts gracefully \\
+MultiThreadedExecutor & \texttt{master\_manager}, \texttt{catch\_executor} & Prevents callback blocking in concurrent scenarios \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Detailed Discussion}
+
+\subsection{Single-Goal Serialization}
+
+The most critical robustness mechanism is the single-goal serialization in \texttt{catch\_executor}. Without this, if \texttt{master\_manager} were to send two goals in quick succession, two control loops would simultaneously publish velocity commands to \texttt{/turtle1/cmd\_vel}, causing unpredictable motion. The serialization is implemented using a thread-safe \texttt{\_busy} flag protected by a \texttt{threading.Lock}: when a goal is accepted, the flag is set; any subsequent goal request is rejected until the current goal completes.
+
+\subsection{Preemption with Hysteresis}
+
+The preemption mechanism allows the system to dynamically switch to a closer target, but the hysteresis margin (\texttt{preempt\_margin}, default: 1.0\,m) prevents the system from rapidly switching between two targets that are nearly equidistant. Without hysteresis, the system could enter a pathological oscillation where it repeatedly cancels and redispatches goals, never making progress toward either target.
+
+\subsection{Failure Cooldown}
+
+When a catch goal fails (e.g., due to timeout or rejection), the target is placed on a cooldown list for a configurable duration (default: 5.0\,s). This prevents the system from immediately retrying a target that is known to be problematic, allowing time for the situation to change (e.g., a new turtle may spawn that is easier to catch). Importantly, preemption-triggered cancellations do not count as failures and do not trigger cooldown, as they represent a deliberate strategy change rather than an error condition.
+
+\subsection{Spawn Resilience}
+
+The \texttt{spawn\_manager} includes two resilience mechanisms. First, on startup, it scans existing \texttt{/turtleN/pose} topics to determine the next available index, preventing name collisions after restarts. Second, if \texttt{turtlesim} rejects a spawn request (signalled by returning an empty name), the node automatically increments the index and retries on the next tick. After a configurable number of consecutive failures, it re-scans topics and resynchronises its index counter.
+
+\subsection{Timeout Protection}
+
+Two timeout mechanisms protect the catch executor from stuck goals. The \texttt{goal\_timeout\_sec} (default: 30.0\,s) provides a hard upper bound on execution time, while the \texttt{no\_pose\_timeout\_sec} (default: 5.0\,s) detects situations where pose data is not being received (e.g., the target turtle has been killed externally). Both timeouts result in a clean goal abort with a zero-velocity stop command.
+
+\subsection{Multi-Threaded Execution}
+
+Both \texttt{master\_manager} and \texttt{catch\_executor} use \texttt{MultiThreadedExecutor} with \texttt{ReentrantCallbackGroup}. This is essential because both nodes have long-running callbacks (the action execute callback in \texttt{catch\_executor} and the action result callback in \texttt{master\_manager}) that would block other callbacks (pose subscriptions, timer callbacks) if executed in a single-threaded executor. The \texttt{ReentrantCallbackGroup} allows multiple callbacks from the same group to execute concurrently, while thread-safe locking (\texttt{\_busy\_lock}, \texttt{\_target\_lock}) protects shared state.

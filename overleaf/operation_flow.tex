@@ -1,0 +1,47 @@
+\chapter{System Operation Flow\label{chap:flow}}
+
+This chapter describes the complete operation flow of the Catch Turtle All system, from startup to continuous operation.
+
+\section{Operation Phases}
+
+The system operates in a continuous loop through the following phases:
+
+\begin{enumerate}[label=\textbf{Phase \arabic*:}]
+  \item \textbf{Startup}: The launch file starts all nodes simultaneously. \texttt{turtlesim\_node} creates \texttt{turtle1} at the centre of the canvas (coordinates 5.544455, 5.544455). The \texttt{spawn\_manager} waits for the \texttt{/spawn} service to become available before starting its timer.
+
+  \item \textbf{Target Generation}: \texttt{spawn\_manager} begins spawning new turtles every 3 seconds at random positions within the configured bounds. Each new turtle immediately starts publishing its pose on the \texttt{/turtleN/pose} topic.
+
+  \item \textbf{Target Discovery}: \texttt{master\_manager} periodically scans the ROS2 topic list (every 1.0\,s) and subscribes to any new \texttt{/turtleN/pose} topics it discovers. It updates the \texttt{TurtleRegistry} with each turtle's position as pose messages arrive.
+
+  \item \textbf{Target Selection}: Every 0.5 seconds, \texttt{master\_manager} evaluates all uncaught turtles---excluding the master turtle, already-caught turtles, and cooled-down targets---and selects the one nearest to the master turtle using Euclidean distance.
+
+  \item \textbf{Pursuit Execution}: \texttt{master\_manager} sends a \texttt{CatchTarget} goal to \texttt{catch\_executor}, which takes control of \texttt{turtle1}'s velocity and drives it toward the target. Real-time distance feedback is published back to \texttt{master\_manager} at 20\,Hz.
+
+  \item \textbf{Preemption Check}: During pursuit, \texttt{master\_manager} continuously re-evaluates target proximity. If a closer target appears (satisfying the hysteresis condition $d_{\text{new}} + m_{\text{preempt}} < d_{\text{current}}$), the current goal is cancelled and a new one is dispatched for the closer target on the next decision tick.
+
+  \item \textbf{Catch Completion}: When \texttt{catch\_executor} detects that the distance to the target is below the catch threshold (0.5\,m), it marks the goal as succeeded, publishes a zero-velocity command to stop the master turtle, and returns the result.
+
+  \item \textbf{Chain Update}: \texttt{master\_manager} receives the successful result, marks the caught turtle in the registry, appends it to the chain, and publishes the updated chain on \texttt{/caught\_chain} as a JSON message.
+
+  \item \textbf{Formation Update}: \texttt{follower\_manager} receives the chain update, creates the necessary pose subscriber and velocity publisher for the new follower, and begins controlling it to follow its predecessor at the configured following distance.
+
+  \item \textbf{Loop}: The system returns to Phase~4 and continues the pursuit cycle indefinitely.
+\end{enumerate}
+
+\section{Edge Cases and Error Handling}
+
+The system handles several edge cases gracefully:
+
+\begin{itemize}
+  \item \textbf{No uncaught targets}: If no uncaught turtles are available, \texttt{master\_manager} simply waits and re-evaluates on the next decision tick. No action goal is dispatched.
+
+  \item \textbf{Action server unavailable}: If \texttt{catch\_executor} is not yet ready, \texttt{master\_manager} logs a warning and retries on the next decision tick.
+
+  \item \textbf{Goal rejection}: If \texttt{catch\_executor} rejects a goal (because it is busy), \texttt{master\_manager} places the target on cooldown and moves on to the next candidate.
+
+  \item \textbf{Goal timeout}: If a pursuit takes longer than \texttt{goal\_timeout\_sec}, \texttt{catch\_executor} aborts the goal and \texttt{master\_manager} places the target on cooldown.
+
+  \item \textbf{Missing pose data}: If no pose is received for either the master or target turtle within \texttt{no\_pose\_timeout\_sec}, the goal is aborted.
+
+  \item \textbf{Spawn failure}: If \texttt{turtlesim} rejects a spawn request, \texttt{spawn\_manager} increments the index and retries on the next tick.
+\end{itemize}

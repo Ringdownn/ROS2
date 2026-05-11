@@ -1,0 +1,784 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{amsmath}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  breaklines=true,
+  frame=single,
+  captionpos=b,
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  filecolor=magenta,
+  urlcolor=cyan,
+}
+
+\title{\textbf{Catch Turtle All}\\[0.5em]\large A ROS2-Based Multi-Turtle Pursuit and Formation System}
+\author{Project Report}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\newpage
+
+\tableofcontents
+\newpage
+
+%=============================================================================
+\section{Project Overview}
+\label{sec:overview}
+%=============================================================================
+
+\subsection{Project Objectives}
+
+The \textbf{Catch Turtle All} project is a ROS2-based robotic simulation system that demonstrates autonomous pursuit, task scheduling, and formation following within the \texttt{turtlesim} environment. The primary objectives of this project are:
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Autonomous Target Discovery and Pursuit}: A master turtle (\texttt{turtle1}) autonomously discovers, selects, and pursues dynamically spawned target turtles in the simulation environment.
+  \item \textbf{Action-Based Task Execution}: Implement a long-running pursuit task using ROS2 Actions, demonstrating goal dispatch, real-time feedback, and result handling with proper cancellation and rejection semantics.
+  \item \textbf{Dynamic Environment Generation}: Continuously spawn new target turtles at random positions, creating an ever-changing environment that tests the system's adaptability.
+  \item \textbf{Chain Formation Following}: After a target turtle is caught, it joins a following chain behind the master turtle, forming a snake-like formation that demonstrates multi-agent coordination.
+  \item \textbf{Robust System Design}: Implement stability mechanisms including single-goal serialization, preemption with hysteresis, failure cooldown, and timeout handling to ensure the system runs reliably over extended periods.
+\end{enumerate}
+
+\subsection{System Summary}
+
+The system consists of five ROS2 nodes organized in a layered architecture:
+
+\begin{itemize}
+  \item \textbf{Simulation Layer}: \texttt{turtlesim\_node} provides the visual simulation environment.
+  \item \textbf{Environment Generation Layer}: \texttt{spawn\_manager} periodically creates new target turtles.
+  \item \textbf{Task Management Layer}: \texttt{master\_manager} serves as the system brain, discovering turtles, selecting targets, and dispatching catch goals.
+  \item \textbf{Execution Control Layer}: \texttt{catch\_executor} implements an Action Server that physically drives the master turtle toward the selected target.
+  \item \textbf{Formation Following Layer}: \texttt{follower\_manager} controls caught turtles to follow their predecessors in a chain formation.
+\end{itemize}
+
+The core operational loop is:
+
+\begin{quote}
+\textit{Spawn turtles $\rightarrow$ Discover and track poses $\rightarrow$ Select nearest target $\rightarrow$ Execute pursuit via Action $\rightarrow$ Mark as caught $\rightarrow$ Add to follow chain $\rightarrow$ Continue to next target}
+\end{quote}
+
+%=============================================================================
+\section{System Architecture}
+\label{sec:architecture}
+%=============================================================================
+
+\subsection{Architecture Overview}
+
+The system follows a layered architecture pattern where each layer has a clearly defined responsibility. Figure~\ref{fig:architecture} illustrates the overall system architecture and the relationships between layers.
+
+\begin{figure}[H]
+  \centering
+  \caption{System Architecture Diagram}
+  \label{fig:architecture}
+  \vspace{0.5em}
+  \textit{(Mermaid Diagram: System Architecture --- see Appendix for source code)}
+  \vspace{0.5em}
+
+  \begin{tabular}{c|c|c}
+    \toprule
+    \textbf{Layer} & \textbf{Node} & \textbf{Role} \\
+    \midrule
+    Simulation & \texttt{turtlesim\_node} & Visual simulation environment \\
+    Environment Generation & \texttt{spawn\_manager} & Periodic turtle spawning \\
+    Task Management & \texttt{master\_manager} & Target selection and dispatch \\
+    Execution Control & \texttt{catch\_executor} & Pursuit action execution \\
+    Formation Following & \texttt{follower\_manager} & Chain following control \\
+    \bottomrule
+  \end{tabular}
+\end{figure}
+
+\subsection{Node Communication Architecture}
+
+The nodes communicate through three ROS2 communication paradigms: \textbf{Topics}, \textbf{Services}, and \textbf{Actions}. Figure~\ref{fig:communication} shows the communication relationships.
+
+\begin{figure}[H]
+  \centering
+  \caption{Node Communication Diagram}
+  \label{fig:communication}
+  \vspace{0.5em}
+  \textit{(Mermaid Diagram: Node Communication --- see Appendix for source code)}
+\end{figure}
+
+The detailed communication interfaces are summarized in Table~\ref{tab:communication}.
+
+\begin{table}[H]
+\centering
+\caption{Node Communication Interfaces}
+\label{tab:communication}
+\begin{tabular}{llll}
+\toprule
+\textbf{Interface} & \textbf{Type} & \textbf{Publisher/Client} & \textbf{Subscriber/Server} \\
+\midrule
+\texttt{/spawn} & Service & \texttt{spawn\_manager} & \texttt{turtlesim\_node} \\
+\texttt{/<name>/pose} & Topic & \texttt{turtlesim\_node} & \texttt{master\_manager}, \texttt{catch\_executor}, \texttt{follower\_manager} \\
+\texttt{/<name>/cmd\_vel} & Topic & \texttt{catch\_executor}, \texttt{follower\_manager} & \texttt{turtlesim\_node} \\
+\texttt{/caught\_chain} & Topic & \texttt{master\_manager} & \texttt{follower\_manager} \\
+\texttt{catch\_target} & Action & \texttt{master\_manager} (Client) & \texttt{catch\_executor} (Server) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Package Structure}
+
+The project is organized into two ROS2 packages:
+
+\begin{itemize}
+  \item \texttt{catch\_turtle\_interfaces} (\texttt{ament\_cmake}): Defines the custom action interface \texttt{CatchTarget.action}.
+  \item \texttt{catch\_turtle\_bringup} (\texttt{ament\_python}): Contains all Python nodes, launch files, and configuration.
+\end{itemize}
+
+The directory structure is as follows:
+
+\begin{lstlisting}[language={},title={Project Directory Structure}]
+src/
+├── catch_turtle_interfaces/
+│   ├── action/
+│   │   └── CatchTarget.action
+│   ├── CMakeLists.txt
+│   └── package.xml
+└── catch_turtle_bringup/
+    ├── catch_turtle_bringup/
+    │   ├── __init__.py
+    │   ├── utils.py
+    │   ├── turtle_registry.py
+    │   ├── spawn_manager.py
+    │   ├── master_manager.py
+    │   ├── catch_executor.py
+    │   └── follower_manager.py
+    ├── launch/
+    │   └── catch_turtle.launch.py
+    ├── config/
+    │   └── params.yaml
+    ├── resource/
+    │   └── catch_turtle_bringup
+    ├── setup.py
+    └── package.xml
+\end{lstlisting}
+
+%=============================================================================
+\section{Component Description and Contribution to Objectives}
+\label{sec:components}
+%=============================================================================
+
+\subsection{Custom Action Interface: CatchTarget}
+\label{subsec:action}
+
+\subsubsection{Description}
+
+The \texttt{CatchTarget} action is the central communication contract between \texttt{master\_manager} and \texttt{catch\_executor}. It is defined in \texttt{CatchTarget.action} as follows:
+
+\begin{lstlisting}[language={},title={CatchTarget.action}]
+string target_name
+---
+bool success
+string caught_name
+---
+float32 distance_remaining
+\end{lstlisting}
+
+\begin{itemize}
+  \item \textbf{Goal}: \texttt{target\_name} specifies which turtle to pursue.
+  \item \textbf{Result}: \texttt{success} indicates whether the catch succeeded; \texttt{caught\_name} confirms the identity of the caught turtle.
+  \item \textbf{Feedback}: \texttt{distance\_remaining} provides real-time distance to the target during execution.
+\end{itemize}
+
+\subsubsection{Contribution to Objectives}
+
+This action interface directly supports \textbf{Objective 2} (Action-Based Task Execution) by providing a structured, asynchronous mechanism for long-running pursuit tasks. The feedback channel enables the master manager to monitor progress and make preemption decisions, while the result channel ensures reliable outcome reporting.
+
+%-----------------------------------------------------------------------------
+\subsection{Utility Module: utils.py}
+\label{subsec:utils}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The \texttt{utils.py} module provides shared mathematical helper functions used across all nodes:
+
+\begin{itemize}
+  \item \texttt{normalize\_angle(theta)}: Wraps an angle to the $[-\pi, \pi]$ range, essential for correct heading error computation.
+  \item \texttt{distance(x1, y1, x2, y2)}: Computes Euclidean distance between two points: $d = \sqrt{(x_2 - x_1)^2 + (y_2 - y_1)^2}$.
+  \item \texttt{angle\_to(x\_from, y\_from, x\_to, y\_to)}: Computes the bearing angle from one point to another: $\theta = \text{atan2}(y_{to} - y_{from},\ x_{to} - x_{from})$.
+  \item \texttt{clamp(value, lo, hi)}: Limits a value within a specified range.
+  \item \texttt{sign(value)}: Returns $+1$, $-1$, or $0$ based on the sign of the input.
+\end{itemize}
+
+\subsubsection{Contribution to Objectives}
+
+This module supports \textbf{all objectives} by ensuring consistent and correct geometric computations. Without proper angle normalization, the control logic would produce incorrect turning commands; without distance calculations, target selection and catch detection would be impossible.
+
+%-----------------------------------------------------------------------------
+\subsection{Turtle Registry: turtle\_registry.py}
+\label{subsec:registry}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The \texttt{TurtleRegistry} class provides a centralized data structure for tracking all turtles known to the system. It stores the following information for each turtle via the \texttt{TurtleEntry} dataclass:
+
+\begin{itemize}
+  \item \texttt{name}: Turtle identifier (e.g., \texttt{turtle2}).
+  \item \texttt{x}, \texttt{y}: Current position coordinates.
+  \item \texttt{caught}: Boolean flag indicating whether the turtle has been caught.
+  \item \texttt{has\_pose}: Boolean flag indicating whether a pose message has been received.
+\end{itemize}
+
+Key methods include:
+\begin{itemize}
+  \item \texttt{add(name)}: Registers a new turtle.
+  \item \texttt{update\_pose(name, x, y)}: Updates a turtle's position.
+  \item \texttt{mark\_caught(name)}: Marks a turtle as caught.
+  \item \texttt{uncaught\_targets(exclude)}: Returns all turtles that have poses and are not yet caught.
+  \item \texttt{nearest\_to(x, y, exclude)}: Finds the nearest uncaught turtle to a given position.
+\end{itemize}
+
+\subsubsection{Contribution to Objectives}
+
+The registry directly supports \textbf{Objective 1} (Autonomous Target Discovery and Pursuit) by maintaining a live state table of all turtles. It enables the master manager to efficiently query for uncaught targets and select the nearest one, which is the core decision-making primitive of the system.
+
+%-----------------------------------------------------------------------------
+\subsection{Spawn Manager: spawn\_manager.py}
+\label{subsec:spawn}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The \texttt{spawn\_manager} node is responsible for periodically generating new target turtles in the simulation. It operates as a service client that calls the \texttt{/spawn} service provided by \texttt{turtlesim\_node}.
+
+\textbf{Key Features:}
+\begin{itemize}
+  \item \textbf{Periodic Spawning}: A timer fires every \texttt{spawn\_period} seconds (default: 3.0\,s) to create a new turtle.
+  \item \textbf{Random Position Generation}: Each new turtle is placed at a random $(x, y, \theta)$ within configurable bounds.
+  \item \textbf{Automatic Index Management}: On startup, the node scans existing \texttt{/turtleN/pose} topics to determine the next available index, preventing name collisions after restarts.
+  \item \textbf{Duplicate Name Handling}: If \texttt{turtlesim} rejects a spawn request (returns an empty name), the node automatically increments the index and retries on the next timer tick.
+  \item \textbf{Failure Resilience}: After a configurable number of consecutive failures (\texttt{max\_consecutive\_failures}), the node re-scans existing topics and resynchronizes its index counter.
+\end{itemize}
+
+\textbf{Configurable Parameters:}
+
+\begin{table}[H]
+\centering
+\caption{Spawn Manager Parameters}
+\begin{tabular}{llc}
+\toprule
+\textbf{Parameter} & \textbf{Description} & \textbf{Default} \\
+\midrule
+\texttt{spawn\_period} & Time between spawns (s) & 3.0 \\
+\texttt{x\_min}, \texttt{x\_max} & X-coordinate bounds & 1.0, 10.0 \\
+\texttt{y\_min}, \texttt{y\_max} & Y-coordinate bounds & 1.0, 10.0 \\
+\texttt{start\_index} & First turtle number & 2 \\
+\texttt{max\_consecutive\_failures} & Failure threshold for rescan & 5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Contribution to Objectives}
+
+This node directly implements \textbf{Objective 3} (Dynamic Environment Generation). By continuously introducing new targets at random positions, it creates a dynamic and unpredictable environment that forces the rest of the system to continuously adapt its pursuit strategy. The robustness features (index scanning, failure handling) ensure that the system can run indefinitely without manual intervention.
+
+%-----------------------------------------------------------------------------
+\subsection{Master Manager: master\_manager.py}
+\label{subsec:master}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The \texttt{master\_manager} node is the central decision-making component (the ``brain'') of the system. It discovers turtles, selects pursuit targets, dispatches catch goals via the Action client, and manages the caught turtle chain.
+
+\textbf{Key Features:}
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Auto-Discovery}: Periodically scans the ROS2 topic list for \texttt{/turtleN/pose} topics and automatically subscribes to new turtles' poses. This eliminates the need for explicit hand-off between \texttt{spawn\_manager} and \texttt{master\_manager}.
+
+  \item \textbf{Nearest-Target Selection}: Every \texttt{decision\_period} (default: 0.5\,s), the node evaluates all uncaught turtles and selects the one closest to the master turtle using Euclidean distance.
+
+  \item \textbf{Action Client}: Sends \texttt{CatchTarget} goals to \texttt{catch\_executor} and handles results, including success, failure, and cancellation.
+
+  \item \textbf{Preemption with Hysteresis}: While a catch goal is in flight, the node continuously re-evaluates whether a closer target has appeared. A preemption occurs only when:
+  \[
+    d_{\text{new}} + m_{\text{preempt}} < d_{\text{current}}
+  \]
+  where $m_{\text{preempt}}$ is the \texttt{preempt\_margin} parameter (default: 1.0\,m). This hysteresis prevents rapid flip-flopping between two nearly equidistant targets.
+
+  \item \textbf{Failure Cooldown}: When a catch goal fails (not due to preemption), the target is placed on a cooldown list for \texttt{failure\_cooldown\_sec} seconds (default: 5.0\,s), preventing the system from repeatedly attempting to catch a problematic target.
+
+  \item \textbf{Chain Management}: Upon successful catch, the turtle is appended to the \texttt{\_chain} list and the updated chain is published on the \texttt{/caught\_chain} topic as a JSON message.
+\end{enumerate}
+
+\textbf{Configurable Parameters:}
+
+\begin{table}[H]
+\centering
+\caption{Master Manager Parameters}
+\begin{tabular}{llc}
+\toprule
+\textbf{Parameter} & \textbf{Description} & \textbf{Default} \\
+\midrule
+\texttt{master\_name} & Name of the master turtle & \texttt{turtle1} \\
+\texttt{discover\_period} & Topic scan interval (s) & 1.0 \\
+\texttt{decision\_period} & Decision tick interval (s) & 0.5 \\
+\texttt{failure\_cooldown\_sec} & Cooldown for failed targets (s) & 5.0 \\
+\texttt{action\_server\_wait\_sec} & Action server wait timeout (s) & 2.0 \\
+\texttt{preempt\_margin} & Preemption hysteresis margin (m) & 1.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Concurrency}: This node uses a \texttt{MultiThreadedExecutor} with \texttt{ReentrantCallbackGroup} to ensure that the Action callbacks and timer callbacks do not block each other.
+
+\subsubsection{Contribution to Objectives}
+
+The master manager is the most critical component for achieving \textbf{Objective 1} (Autonomous Target Discovery and Pursuit) and \textbf{Objective 2} (Action-Based Task Execution). It orchestrates the entire pursuit workflow: discovering targets, making intelligent decisions about which target to pursue, managing the action lifecycle, and coordinating the formation chain. The preemption mechanism ensures that the system always pursues the most efficient target, while the cooldown mechanism prevents pathological retry loops.
+
+%-----------------------------------------------------------------------------
+\subsection{Catch Executor: catch\_executor.py}
+\label{subsec:catch}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The \texttt{catch\_executor} node implements the Action Server for the \texttt{catch\_target} action. It physically controls the master turtle's velocity to pursue and catch a designated target.
+
+\textbf{Key Features:}
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Single-Goal Serialization}: While one goal is executing, any new goal request is \texttt{REJECTED}. This ensures that two control loops never simultaneously publish conflicting velocity commands to \texttt{/turtle1/cmd\_vel}. Preemption is handled by the master manager canceling the current goal, not by queuing multiple goals.
+
+  \item \textbf{Control Law}: At each control tick (default: 20\,Hz), the node computes:
+  \begin{itemize}
+    \item Distance to target: $d = \sqrt{\Delta x^2 + \Delta y^2}$
+    \item Target bearing: $\theta_{\text{target}} = \text{atan2}(\Delta y, \Delta x)$
+    \item Forward heading error: $e_f = \text{normalize}(\theta_{\text{target}} - \theta_{\text{master}})$
+    \item Backward heading error (if \texttt{allow\_reverse} is enabled): $e_b = \text{normalize}(e_f - \pi)$
+  \end{itemize}
+
+  The control strategy is:
+  \begin{itemize}
+    \item If $|e_{\text{heading}}| > \texttt{angle\_tolerance}$: Turn in place toward the target.
+    \item Otherwise: Move forward (or backward if \texttt{allow\_reverse} and $|e_b| < |e_f|$) while applying proportional angular correction.
+  \end{itemize}
+
+  \item \textbf{Catch Detection}: When the distance falls below \texttt{catch\_distance} (default: 0.5\,m), the goal succeeds.
+
+  \item \textbf{Timeout Handling}: Two timeout mechanisms protect against stuck goals:
+  \begin{itemize}
+    \item \texttt{goal\_timeout\_sec} (default: 30.0\,s): Total execution time limit.
+    \item \texttt{no\_pose\_timeout\_sec} (default: 5.0\,s): Maximum wait for pose data before aborting.
+  \end{itemize}
+
+  \item \textbf{Cancellation Support}: Goals can be canceled at any time (accepted by \texttt{\_on\_cancel}), and the node immediately stops the turtle.
+\end{enumerate}
+
+\textbf{Configurable Parameters:}
+
+\begin{table}[H]
+\centering
+\caption{Catch Executor Parameters}
+\begin{tabular}{llc}
+\toprule
+\textbf{Parameter} & \textbf{Description} & \textbf{Default} \\
+\midrule
+\texttt{master\_name} & Name of the master turtle & \texttt{turtle1} \\
+\texttt{linear\_speed} & Forward/backward speed (m/s) & 1.5 \\
+\texttt{angular\_speed} & Turning speed (rad/s) & 3.0 \\
+\texttt{max\_angular\_speed} & Maximum angular speed (rad/s) & 4.0 \\
+\texttt{catch\_distance} & Catch threshold (m) & 0.5 \\
+\texttt{angle\_tolerance} & Heading tolerance (rad) & 0.1 \\
+\texttt{control\_rate\_hz} & Control loop frequency (Hz) & 20.0 \\
+\texttt{goal\_timeout\_sec} & Total goal timeout (s) & 30.0 \\
+\texttt{no\_pose\_timeout\_sec} & No-pose timeout (s) & 5.0 \\
+\texttt{allow\_reverse} & Enable backward driving & False \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Concurrency}: This node uses a \texttt{MultiThreadedExecutor} with \texttt{ReentrantCallbackGroup} and thread-safe locking (\texttt{\_busy\_lock}, \texttt{\_target\_lock}) to ensure that the long-running execute callback does not block pose subscriptions.
+
+\subsubsection{Contribution to Objectives}
+
+The catch executor directly implements \textbf{Objective 2} (Action-Based Task Execution) by providing a robust Action Server that handles the physical pursuit task. The single-goal serialization ensures system stability, while the timeout mechanisms and cancellation support contribute to \textbf{Objective 5} (Robust System Design). The optional reverse driving feature demonstrates extensibility in control strategy design.
+
+%-----------------------------------------------------------------------------
+\subsection{Follower Manager: follower\_manager.py}
+\label{subsec:follower}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The \texttt{follower\_manager} node implements the chain formation behavior. After a turtle is caught, it is added to a following chain where each caught turtle follows its predecessor.
+
+\textbf{Key Features:}
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Chain Subscription}: Listens to the \texttt{/caught\_chain} topic for JSON messages containing the leader name and the ordered chain of caught turtles.
+
+  \item \textbf{Dynamic Subscription Management}: Automatically creates pose subscribers and velocity publishers for each new follower as it joins the chain.
+
+  \item \textbf{Proportional Following Control}: At each control tick (default: 20\,Hz), for each follower in the chain:
+  \begin{itemize}
+    \item The leader is \texttt{turtle1} for the first follower, or the previous follower in the chain for subsequent followers.
+    \item If the distance to the leader is less than \texttt{follow\_distance} (default: 0.8\,m), the follower stops.
+    \item If the heading error exceeds \texttt{angle\_tolerance} (default: 0.15\,rad), the follower turns toward the leader.
+    \item Otherwise, the follower moves forward with proportional speed control:
+    \[
+      v = K_p^{(l)} \cdot (d - d_{\text{follow}}), \quad v \in [0, v_{\max}]
+    \]
+    and proportional angular correction:
+    \[
+      \omega = K_p^{(\omega)} \cdot e_{\text{angle}}, \quad \omega \in [-\omega_{\max}, \omega_{\max}]
+    \]
+  \end{itemize}
+
+  \item \textbf{Chain Rule}: The first caught turtle follows \texttt{turtle1}, the second follows the first, the third follows the second, and so on, forming a snake-like chain.
+\end{enumerate}
+
+\textbf{Configurable Parameters:}
+
+\begin{table}[H]
+\centering
+\caption{Follower Manager Parameters}
+\begin{tabular}{llc}
+\toprule
+\textbf{Parameter} & \textbf{Description} & \textbf{Default} \\
+\midrule
+\texttt{leader\_name} & Chain leader name & \texttt{turtle1} \\
+\texttt{follow\_distance} & Desired following distance (m) & 0.8 \\
+\texttt{linear\_speed} & Maximum linear speed (m/s) & 1.2 \\
+\texttt{angular\_speed} & Maximum angular speed (rad/s) & 2.5 \\
+\texttt{max\_angular\_speed} & Angular speed cap (rad/s) & 3.5 \\
+\texttt{angle\_tolerance} & Heading tolerance (rad) & 0.15 \\
+\texttt{control\_rate\_hz} & Control loop frequency (Hz) & 20.0 \\
+\texttt{linear\_kp} & Proportional gain for linear speed & 1.0 \\
+\texttt{angular\_kp} & Proportional gain for angular speed & 4.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Contribution to Objectives}
+
+The follower manager directly implements \textbf{Objective 4} (Chain Formation Following). By maintaining a dynamic chain of caught turtles and applying proportional control for each follower, it creates a visually compelling snake-like formation. The proportional control with distance threshold prevents oscillation and collision, contributing to \textbf{Objective 5} (Robust System Design).
+
+%-----------------------------------------------------------------------------
+\subsection{Launch File: catch\_turtle.launch.py}
+\label{subsec:launch}
+%-----------------------------------------------------------------------------
+
+\subsubsection{Description}
+
+The launch file starts all five nodes with a single command and loads the shared parameter file:
+
+\begin{lstlisting}[title={catch\_turtle.launch.py (simplified)}]
+Node(package='turtlesim',
+     executable='turtlesim_node', ...),
+Node(package='catch_turtle_bringup',
+     executable='spawn_manager',
+     parameters=[params_file], ...),
+Node(package='catch_turtle_bringup',
+     executable='catch_executor',
+     parameters=[params_file], ...),
+Node(package='catch_turtle_bringup',
+     executable='master_manager',
+     parameters=[params_file], ...),
+Node(package='catch_turtle_bringup',
+     executable='follower_manager',
+     parameters=[params_file], ...),
+\end{lstlisting}
+
+\subsubsection{Contribution to Objectives}
+
+The launch file provides a single-command startup mechanism that ensures all nodes are launched in the correct configuration with shared parameters. This simplifies deployment and testing, and ensures that the system starts in a consistent state.
+
+%=============================================================================
+\section{System Operation Flow}
+\label{sec:flow}
+%=============================================================================
+
+The complete system operation follows the flow shown in Figure~\ref{fig:flow}.
+
+\begin{figure}[H]
+  \centering
+  \caption{System Operation Flowchart}
+  \label{fig:flow}
+  \vspace{0.5em}
+  \textit{(Mermaid Diagram: System Operation Flow --- see Appendix for source code)}
+\end{figure}
+
+The detailed operation sequence is:
+
+\begin{enumerate}[label=\textbf{Phase \arabic*:}]
+  \item \textbf{Startup}: The launch file starts all nodes. \texttt{turtlesim\_node} creates \texttt{turtle1} at the center of the canvas.
+
+  \item \textbf{Target Generation}: \texttt{spawn\_manager} begins spawning new turtles every 3 seconds at random positions. Each new turtle immediately starts publishing its pose on \texttt{/turtleN/pose}.
+
+  \item \textbf{Target Discovery}: \texttt{master\_manager} periodically scans the topic list and subscribes to any new \texttt{/turtleN/pose} topics it discovers. It updates the \texttt{TurtleRegistry} with each turtle's position.
+
+  \item \textbf{Target Selection}: Every 0.5 seconds, \texttt{master\_manager} evaluates all uncaught turtles (excluding the master, already-caught turtles, and cooled-down targets) and selects the nearest one to the master turtle.
+
+  \item \textbf{Pursuit Execution}: \texttt{master\_manager} sends a \texttt{CatchTarget} goal to \texttt{catch\_executor}, which takes control of \texttt{turtle1}'s velocity and drives it toward the target. Real-time distance feedback is published back to \texttt{master\_manager}.
+
+  \item \textbf{Preemption Check}: During pursuit, \texttt{master\_manager} continuously re-evaluates target proximity. If a closer target appears (with hysteresis margin), the current goal is canceled and a new one is dispatched for the closer target.
+
+  \item \textbf{Catch Completion}: When \texttt{catch\_executor} detects that the distance is below the catch threshold (0.5\,m), it marks the goal as succeeded and returns the result.
+
+  \item \textbf{Chain Update}: \texttt{master\_manager} marks the caught turtle in the registry, appends it to the chain, and publishes the updated chain on \texttt{/caught\_chain}.
+
+  \item \textbf{Formation Update}: \texttt{follower\_manager} receives the chain update, creates the necessary subscribers and publishers for the new follower, and begins controlling it to follow its predecessor.
+
+  \item \textbf{Loop}: The system returns to Phase 4 and continues the pursuit cycle.
+\end{enumerate}
+
+%=============================================================================
+\section{Control Algorithms}
+\label{sec:algorithms}
+%=============================================================================
+
+\subsection{Pursuit Control Algorithm}
+
+The catch executor uses a two-phase control strategy: \textbf{turn-then-drive}. The algorithm is:
+
+\begin{enumerate}
+  \item Compute the target bearing angle:
+  \[
+    \theta_{\text{target}} = \text{atan2}(y_t - y_m,\ x_t - x_m)
+  \]
+
+  \item Compute the heading error:
+  \[
+    e = \text{normalize}(\theta_{\text{target}} - \theta_m)
+  \]
+
+  \item If \texttt{allow\_reverse} is enabled, also compute the backward error:
+  \[
+    e_b = \text{normalize}(e - \pi)
+  \]
+  and select the direction with the smaller absolute error.
+
+  \item Control decision:
+  \begin{itemize}
+    \item If $|e| > \texttt{angle\_tolerance}$: $\omega = \texttt{angular\_speed} \cdot \text{sign}(e)$, $v = 0$ (pure rotation).
+    \item Otherwise: $v = d_{\text{direction}} \cdot \texttt{linear\_speed}$, $\omega = \text{clamp}(2.0 \cdot e,\ -\omega_{\max},\ \omega_{\max})$ (drive with proportional steering).
+  \end{itemize}
+
+  \item Catch detection: If $d < \texttt{catch\_distance}$, the goal succeeds.
+\end{enumerate}
+
+\subsection{Following Control Algorithm}
+
+The follower manager uses a proportional control strategy:
+
+\begin{enumerate}
+  \item For each follower $i$ in the chain, identify its leader:
+  \[
+    \text{leader}_i = \begin{cases} \texttt{turtle1} & \text{if } i = 0 \\ \text{follower}_{i-1} & \text{otherwise} \end{cases}
+  \]
+
+  \item Compute distance $d$ and heading error $e$ to the leader.
+
+  \item If $d < \texttt{follow\_distance}$: Stop ($v = 0$, $\omega = 0$).
+
+  \item If $|e| > \texttt{angle\_tolerance}$: Pure rotation ($\omega = \texttt{angular\_speed} \cdot \text{sign}(e)$).
+
+  \item Otherwise: Proportional control:
+  \[
+    v = K_p^{(l)} \cdot (d - d_{\text{follow}}), \quad v \in [0, v_{\max}]
+  \]
+  \[
+    \omega = K_p^{(\omega)} \cdot e, \quad \omega \in [-\omega_{\max}, \omega_{\max}]
+  \]
+\end{enumerate}
+
+%=============================================================================
+\section{Robustness Design}
+\label{sec:robustness}
+%=============================================================================
+
+A key contribution of this project is its emphasis on long-running stability. The following mechanisms ensure robust operation:
+
+\begin{table}[H]
+\centering
+\caption{Robustness Mechanisms}
+\label{tab:robustness}
+\begin{tabular}{p{3.5cm}p{4cm}p{6cm}}
+\toprule
+\textbf{Mechanism} & \textbf{Node} & \textbf{Purpose} \\
+\midrule
+Single-goal serialization & \texttt{catch\_executor} & Prevents conflicting velocity commands from multiple concurrent goals \\
+Preemption with hysteresis & \texttt{master\_manager} & Avoids flip-flopping between nearly equidistant targets \\
+Failure cooldown & \texttt{master\_manager} & Prevents pathological retry loops on problematic targets \\
+Duplicate name handling & \texttt{spawn\_manager} & Automatically skips indices on spawn rejection \\
+Startup index scanning & \texttt{spawn\_manager} & Prevents name collisions after node restart \\
+Goal timeout & \texttt{catch\_executor} & Prevents stuck goals from blocking the system indefinitely \\
+No-pose timeout & \texttt{catch\_executor} & Detects missing pose data and aborts gracefully \\
+MultiThreadedExecutor & \texttt{master\_manager}, \texttt{catch\_executor} & Prevents callback blocking in concurrent scenarios \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=============================================================================
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+%=============================================================================
+
+\subsection{Summary}
+
+This project successfully implements a ROS2-based multi-turtle pursuit and formation system that demonstrates several key robotics concepts:
+
+\begin{itemize}
+  \item \textbf{Autonomous decision-making}: The master manager autonomously discovers targets, selects the nearest one, and dynamically adapts its strategy through preemption.
+  \item \textbf{Action-based task execution}: The CatchTarget action demonstrates the full lifecycle of a ROS2 Action, including goal dispatch, real-time feedback, cancellation, and result handling.
+  \item \textbf{Multi-agent coordination}: The follower manager coordinates multiple caught turtles into a chain formation using proportional control.
+  \item \textbf{Robust system design}: Multiple stability mechanisms (serialization, hysteresis, cooldown, timeouts) ensure the system runs reliably over extended periods.
+\end{itemize}
+
+\subsection{Future Work}
+
+Potential improvements and extensions include:
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Path Planning}: Replace the simple turn-then-drive controller with a path planner (e.g., A* or RRT) to handle obstacles.
+  \item \textbf{Obstacle Avoidance}: Add obstacle detection and avoidance to prevent collisions between the master turtle and caught followers.
+  \item \textbf{Multi-Master Pursuit}: Extend the system to support multiple master turtles that cooperatively pursue targets.
+  \item \textbf{Adaptive Parameters}: Implement online parameter tuning based on performance metrics (e.g., catch rate, average pursuit time).
+  \item \textbf{Visualization}: Add RViz2 markers to visualize the pursuit trajectory and chain formation in real time.
+  \item \textbf{Testing}: Add unit tests and integration tests using \texttt{launch\_testing} to verify system behavior automatically.
+\end{enumerate}
+
+%=============================================================================
+\appendix
+\section{Mermaid Diagram Source Code}
+\label{sec:mermaid}
+%=============================================================================
+
+\subsection{System Architecture Diagram}
+
+\begin{lstlisting}[language={},title={System Architecture}]
+graph TB
+    subgraph Simulation Layer
+        TS[turtlesim_node]
+    end
+
+    subgraph Task Management Layer
+        MM[master_manager]
+    end
+
+    subgraph Execution Control Layer
+        CE[catch_executor]
+    end
+
+    subgraph Environment Generation Layer
+        SM[spawn_manager]
+    end
+
+    subgraph Formation Following Layer
+        FM[follower_manager]
+    end
+
+    SM -->|/spawn service call| TS
+    MM -->|CatchTarget action goal| CE
+    CE -->|/turtle1/cmd_vel| TS
+    FM -->|/turtleN/cmd_vel| TS
+    MM -->|/caught_chain topic| FM
+    TS -->|/turtleN/pose topics| MM
+    TS -->|/turtle1/pose| CE
+    TS -->|/target/pose| CE
+    TS -->|/turtleN/pose| FM
+\end{lstlisting}
+
+\subsection{Node Communication Diagram}
+
+\begin{lstlisting}[language={},title={Node Communication}]
+graph LR
+    SM[spawn_manager] -->|Spawn.Request| TS[turtlesim_node]
+    TS -->|/turtleN/pose| MM[master_manager]
+    TS -->|/turtle1/pose| CE[catch_executor]
+    TS -->|/targetN/pose| CE
+    TS -->|/turtleN/pose| FM[follower_manager]
+    MM -->|CatchTarget.Goal| CE
+    CE -->|CatchTarget.Feedback/Result| MM
+    MM -->|/caught_chain String| FM
+    CE -->|/turtle1/cmd_vel Twist| TS
+    FM -->|/turtleN/cmd_vel Twist| TS
+\end{lstlisting}
+
+\subsection{System Operation Flowchart}
+
+\begin{lstlisting}[language={},title={System Operation Flow}]
+graph TB
+    A[System Start] --> B[Launch all nodes]
+    B --> C[spawn_manager generates turtles]
+    C --> D[master_manager discovers turtles]
+    D --> E{Any uncaught turtle?}
+    E -->|No| D
+    E -->|Yes| F[Select nearest uncaught turtle]
+    F --> G[Send CatchTarget action goal]
+    G --> H[catch_executor drives turtle1]
+    H --> I{Distance < catch_distance?}
+    I -->|No| J{Preempt by closer target?}
+    J -->|Yes| K[Cancel current goal]
+    K --> F
+    J -->|No| H
+    I -->|Yes| L[Return success result]
+    L --> M[Update caught_chain]
+    M --> N[Add turtle to follow chain]
+    N --> F
+\end{lstlisting}
+
+\subsection{Catch Executor Control Flow}
+
+\begin{lstlisting}[language={},title={Catch Executor Control Flow}]
+graph TB
+    A[Receive CatchTarget goal] --> B{Busy?}
+    B -->|Yes| C[REJECT goal]
+    B -->|No| D[ACCEPT goal]
+    D --> E[Subscribe to target pose]
+    E --> F{Goal canceled?}
+    F -->|Yes| G[Stop and return]
+    F -->|No| H{Timeout?}
+    H -->|Yes| I[Abort goal]
+    H -->|No| J[Calculate distance and heading]
+    J --> K{Distance < catch_distance?}
+    K -->|Yes| L[Succeed and return]
+    K -->|No| M{Heading error > tolerance?}
+    M -->|Yes| N[Turn toward target]
+    M -->|No| O[Move forward toward target]
+    N --> F
+    O --> F
+\end{lstlisting}
+
+\subsection{Follower Chain Diagram}
+
+\begin{lstlisting}[language={},title={Follower Chain}]
+graph LR
+    T1[turtle1 - Leader] -->|followed by| T2[turtle2 - Follower 1]
+    T2 -->|followed by| T5[turtle5 - Follower 2]
+    T5 -->|followed by| T4[turtle4 - Follower 3]
+\end{lstlisting}
+
+\end{document}

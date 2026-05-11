@@ -1,0 +1,37 @@
+\chapter{Conclusion and Future Work\label{chap:conclusion}}
+
+\section{Summary}
+
+This project has successfully implemented \textbf{Catch Turtle All}, a ROS2-based multi-turtle pursuit and formation system that demonstrates several key robotics and software engineering concepts:
+
+\begin{itemize}
+  \item \textbf{Autonomous decision-making}: The master manager autonomously discovers targets through topic scanning, selects the nearest one using Euclidean distance, and dynamically adapts its strategy through preemption with hysteresis. The system requires no manual intervention once launched.
+
+  \item \textbf{Action-based task execution}: The \texttt{CatchTarget} action demonstrates the full lifecycle of a ROS2 Action, including goal dispatch, real-time feedback at 20\,Hz, cancellation for preemption, rejection for serialisation, and result handling for both success and failure cases.
+
+  \item \textbf{Multi-agent coordination}: The follower manager coordinates multiple caught turtles into a chain formation using proportional control, with each follower tracking its predecessor rather than the master turtle directly. This produces natural, snake-like movement.
+
+  \item \textbf{Robust system design}: Eight distinct robustness mechanisms---including single-goal serialization, preemption with hysteresis, failure cooldown, spawn resilience, timeout protection, and multi-threaded execution---ensure that the system runs reliably over extended periods without degradation.
+\end{itemize}
+
+The project also demonstrates proper software engineering practices: separation of concerns across nodes, shared utility modules, centralised configuration via YAML parameters, and a single-command launch mechanism.
+
+\section{Future Work}
+
+Several directions for future improvement and extension have been identified:
+
+\begin{enumerate}
+  \item \textbf{Path Planning}: Replace the simple turn-then-drive controller with a path planner (e.g., A* or RRT) to handle obstacles and generate smoother trajectories.
+
+  \item \textbf{Obstacle Avoidance}: Add obstacle detection and avoidance to prevent collisions between the master turtle and caught followers, particularly when the chain grows long and followers cut corners.
+
+  \item \textbf{Multi-Master Pursuit}: Extend the system to support multiple master turtles that cooperatively pursue targets, demonstrating multi-robot task allocation.
+
+  \item \textbf{Adaptive Parameters}: Implement online parameter tuning based on performance metrics such as catch rate, average pursuit time, and chain stability.
+
+  \item \textbf{Visualisation}: Add RViz2 markers to visualise the pursuit trajectory, target selection, and chain formation in real time, providing better insight into the system's behaviour.
+
+  \item \textbf{Testing}: Add unit tests for the utility module and turtle registry, and integration tests using \texttt{launch\_testing} to verify system behaviour automatically.
+
+  \item \textbf{Sim-to-Real Transfer}: Explore the feasibility of transferring the control algorithms from the \texttt{turtlesim} simulation to real TurtleBot3 robots, addressing challenges such as sensor noise, actuator delays, and physical collisions.
+\end{enumerate}

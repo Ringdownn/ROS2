@@ -1,5 +1,3 @@
-"""Make every caught turtle follow its predecessor in the chain."""
-
 from __future__ import annotations
 
 import json
@@ -110,13 +108,11 @@ class FollowerManagerNode(Node):
             dist = utils.distance(f_pose.x, f_pose.y, l_pose.x, l_pose.y)
             twist = Twist()
 
-            # 计算目标角度（朝向领导者）
             target_angle = utils.angle_to(
                 f_pose.x, f_pose.y, l_pose.x, l_pose.y,
             )
             angle_err = utils.normalize_angle(target_angle - f_pose.theta)
 
-            # 如果距离太近，后退或停止
             if dist < follow_distance * 0.5:
                 if abs(angle_err) < angle_tolerance:
                     twist.linear.x = -linear_speed * 0.3
@@ -128,15 +124,12 @@ class FollowerManagerNode(Node):
                 pub.publish(twist)
                 continue
 
-            # 正常跟随：同时转向和前进
-            # 角度控制
             if abs(angle_err) > angle_tolerance:
                 twist.angular.z = utils.clamp(
                     angular_kp * angle_err,
                     -max_angular_speed, max_angular_speed,
                 )
             
-            # 速度控制：根据距离调整
             if dist > follow_distance:
                 speed = linear_kp * (dist - follow_distance)
                 twist.linear.x = utils.clamp(speed, 0.0, linear_speed)

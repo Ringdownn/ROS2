@@ -1,13 +1,3 @@
-"""Periodically spawn new turtles in turtlesim.
-
-Robustness features:
-- On startup, scans existing /turtleN/pose topics and starts numbering from
-  max(existing) + 1, so a restart of this node never collides with surviving
-  turtles.
-- If turtlesim refuses to spawn (returns an empty name), automatically bumps
-  the index and retries on the next tick instead of getting stuck forever.
-"""
-
 from __future__ import annotations
 
 import math

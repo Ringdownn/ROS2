@@ -1,0 +1,84 @@
+\chapter{System Description and Component Contributions\label{chap:system}}
+
+This chapter describes the robotic system and each of its components, and explains how each component contributes to the project objectives outlined in Chapter~\ref{chap:introduction}.
+
+\section{System Architecture}
+
+The system follows a layered architecture with clearly separated responsibilities. The nodes communicate through three ROS2 paradigms: \textbf{Topics} for continuous data streaming (poses, velocities), \textbf{Services} for request--response interactions (spawning), and \textbf{Actions} for long-running tasks with feedback (pursuit).
+
+\begin{table}[htbp]
+\centering
+\caption{Node Communication Summary}
+\label{tab:communication}
+\begin{tabular}{llll}
+\toprule
+\textbf{Interface} & \textbf{Type} & \textbf{From} & \textbf{To} \\
+\midrule
+\texttt{/spawn} & Service & \texttt{spawn\_manager} & \texttt{turtlesim\_node} \\
+\texttt{/<name>/pose} & Topic & \texttt{turtlesim\_node} & All other nodes \\
+\texttt{/<name>/cmd\_vel} & Topic & \texttt{catch\_executor}, \texttt{follower\_manager} & \texttt{turtlesim\_node} \\
+\texttt{/caught\_chain} & Topic & \texttt{master\_manager} & \texttt{follower\_manager} \\
+\texttt{catch\_target} & Action & \texttt{master\_manager} (Client) & \texttt{catch\_executor} (Server) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Component Descriptions and Contributions}
+
+\subsection{Custom Action Interface: CatchTarget}
+
+The \texttt{CatchTarget} action defines the communication contract between the task manager and the executor. Its goal specifies the target turtle name; its result confirms success and the caught turtle's identity; its feedback reports the remaining distance in real time.
+
+\textbf{Contribution to Objectives}: This interface directly enables \textbf{O2} (Action-Based Task Execution). By using ROS2 Actions rather than simple services or topics, the system gains structured goal--feedback--result semantics, cancellation support, and the ability to monitor long-running tasks.
+
+\subsection{Spawn Manager}
+
+The \texttt{spawn\_manager} node periodically calls the \texttt{/spawn} service to create new turtles at random positions within the canvas. It handles duplicate names gracefully by scanning existing topics on startup and auto-incrementing indices when spawn requests are rejected.
+
+\textbf{Contribution to Objectives}: This node directly implements \textbf{O3} (Dynamic Environment Generation). Without continuous spawning, the system would quickly exhaust its targets and halt. The robustness features (startup scanning, duplicate handling) ensure the node can run indefinitely without manual intervention, also supporting \textbf{O5}.
+
+\subsection{Master Manager}
+
+The \texttt{master\_manager} node serves as the system brain. It auto-discovers turtles by scanning pose topics, maintains a registry of all known turtles with their caught/uncaught status, and periodically selects the nearest uncaught target. It dispatches \texttt{CatchTarget} goals to the executor and handles results---updating the caught chain upon success, or placing failed targets on a temporary cooldown. A preemption mechanism with hysteresis allows switching to a closer target mid-pursuit, preventing the system from being locked onto a suboptimal choice.
+
+\textbf{Contribution to Objectives}: This node is central to \textbf{O1} (Autonomous Target Discovery and Pursuit) and \textbf{O2} (Action-Based Task Execution). The nearest-target selection logic, preemption with hysteresis, and failure cooldown all contribute to \textbf{O5} (Robust System Design) by preventing oscillation and pathological retry loops.
+
+\subsection{Catch Executor}
+
+The \texttt{catch\_executor} node implements the Action Server for \texttt{catch\_target}. It drives the master turtle toward the designated target using a turn-then-drive control strategy: first rotate to face the target, then move forward while applying proportional angular correction. It enforces single-goal serialization---rejecting new goals while one is in progress---and protects against stuck goals with total-timeout and no-pose-timeout mechanisms.
+
+\textbf{Contribution to Objectives}: This node directly implements \textbf{O2} (Action-Based Task Execution) by providing the physical pursuit capability. The serialization mechanism prevents conflicting velocity commands, while the timeout handling contributes to \textbf{O5} (Robust System Design).
+
+\subsection{Follower Manager}
+
+The \texttt{follower\_manager} node receives the caught chain via the \texttt{/caught\_chain} topic and controls each caught turtle to follow its predecessor. The first caught turtle follows the master; each subsequent turtle follows the one before it. A proportional control law with a distance threshold ensures followers maintain a safe gap without colliding or oscillating.
+
+\textbf{Contribution to Objectives}: This node directly implements \textbf{O4} (Chain Formation Following). The chain-based leader assignment---where each follower tracks its predecessor rather than the master---produces natural, snake-like movement. The distance threshold and proportional control contribute to \textbf{O5} by preventing collision and oscillation.
+
+\subsection{Utility Modules}
+
+Two shared utility modules support the entire system. The \texttt{utils} module provides geometric helper functions (angle normalization, distance calculation, clamping). The \texttt{turtle\_registry} module maintains a centralised state table of all turtles with query methods for uncaught targets and nearest-neighbour selection.
+
+\textbf{Contribution to Objectives}: These modules support all objectives by ensuring consistent, correct geometric computations and reliable state management across nodes. Centralising this logic eliminates duplication and reduces the risk of inconsistent implementations.
+
+\section{Summary of Component--Objective Mapping}
+
+Table~\ref{tab:mapping} summarises how each component contributes to the project objectives.
+
+\begin{table}[htbp]
+\centering
+\caption{Component--Objective Mapping}
+\label{tab:mapping}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Component} & \textbf{O1} & \textbf{O2} & \textbf{O3} & \textbf{O4} & \textbf{O5} \\
+\midrule
+CatchTarget Action & & $\bullet$ & & & \\
+Spawn Manager & & & $\bullet$ & & $\bullet$ \\
+Master Manager & $\bullet$ & $\bullet$ & & & $\bullet$ \\
+Catch Executor & & $\bullet$ & & & $\bullet$ \\
+Follower Manager & & & & $\bullet$ & $\bullet$ \\
+Utility Modules & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ \\
+\bottomrule
+\end{tabular}
+\end{table}

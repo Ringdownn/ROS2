@@ -1,12 +1,9 @@
-"""Math helpers shared by all catch_turtle_bringup nodes."""
-
 from __future__ import annotations
 
 import math
 
 
 def normalize_angle(theta: float) -> float:
-    """Wrap an angle to the [-pi, pi] range."""
     while theta > math.pi:
         theta -= 2.0 * math.pi
     while theta < -math.pi:
@@ -29,7 +26,6 @@ def clamp(value: float, lo: float, hi: float) -> float:
 
 
 def sign(value: float) -> float:
-    """Return +1.0 / -1.0 / 0.0 mirroring math.copysign but keeping zero as zero."""
     if value > 0.0:
         return 1.0
     if value < 0.0:

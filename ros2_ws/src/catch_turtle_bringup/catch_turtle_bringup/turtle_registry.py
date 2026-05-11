@@ -1,5 +1,3 @@
-"""Internal registry for tracking all turtles known to the system."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,8 +16,6 @@ class TurtleEntry:
 
 
 class TurtleRegistry:
-    """Holds the live state of every turtle the system has seen."""
-
     def __init__(self) -> None:
         self._turtles: Dict[str, TurtleEntry] = {}
 

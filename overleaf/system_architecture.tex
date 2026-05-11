@@ -1,0 +1,101 @@
+\chapter{System Architecture\label{chap:architecture}}
+
+\section{Architecture Overview}
+
+The system follows a layered architecture pattern where each layer has a clearly defined responsibility. The five layers---Simulation, Environment Generation, Task Management, Execution Control, and Formation Following---communicate through well-defined ROS2 interfaces. Figure~\ref{fig:architecture} illustrates the overall system architecture and the relationships between layers.
+
+\begin{figure}[htbp]
+  \centering
+  \caption{System Architecture Diagram}
+  \label{fig:architecture}
+  \vspace{0.5em}
+  \begin{tabular}{c|c|c}
+    \toprule
+    \textbf{Layer} & \textbf{Node} & \textbf{Role} \\
+    \midrule
+    Simulation & \texttt{turtlesim\_node} & Visual simulation environment \\
+    Environment Generation & \texttt{spawn\_manager} & Periodic turtle spawning \\
+    Task Management & \texttt{master\_manager} & Target selection and dispatch \\
+    Execution Control & \texttt{catch\_executor} & Pursuit action execution \\
+    Formation Following & \texttt{follower\_manager} & Chain following control \\
+    \bottomrule
+  \end{tabular}
+\end{figure}
+
+The design rationale for this layered decomposition is threefold: (1) each layer has a clear, single responsibility, making the system easy to understand and debug; (2) the communication patterns naturally map to ROS2 paradigms---services for spawning, topics for continuous data flow, and actions for long-running tasks; and (3) the architecture is extensible, allowing individual layers to be modified or replaced without affecting others.
+
+\section{Node Communication Architecture}
+
+The nodes communicate through three ROS2 communication paradigms: \textbf{Topics}, \textbf{Services}, and \textbf{Actions}. Table~\ref{tab:communication} summarises the complete communication interfaces.
+
+\begin{table}[htbp]
+\centering
+\caption{Node Communication Interfaces}
+\label{tab:communication}
+\begin{tabular}{llll}
+\toprule
+\textbf{Interface} & \textbf{Type} & \textbf{Publisher/Client} & \textbf{Subscriber/Server} \\
+\midrule
+\texttt{/spawn} & Service & \texttt{spawn\_manager} & \texttt{turtlesim\_node} \\
+\texttt{/<name>/pose} & Topic & \texttt{turtlesim\_node} & \texttt{master\_manager}, \texttt{catch\_executor}, \texttt{follower\_manager} \\
+\texttt{/<name>/cmd\_vel} & Topic & \texttt{catch\_executor}, \texttt{follower\_manager} & \texttt{turtlesim\_node} \\
+\texttt{/caught\_chain} & Topic & \texttt{master\_manager} & \texttt{follower\_manager} \\
+\texttt{catch\_target} & Action & \texttt{master\_manager} (Client) & \texttt{catch\_executor} (Server) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The communication design follows these principles:
+
+\begin{itemize}
+  \item \textbf{Topics} are used for continuous, streaming data such as turtle poses and velocity commands, where the latest value is always the most relevant.
+  \item \textbf{Services} are used for request--response interactions such as spawning a new turtle, where a confirmation is required.
+  \item \textbf{Actions} are used for long-running tasks such as pursuing a target, where real-time feedback and the ability to cancel are essential.
+\end{itemize}
+
+\section{Package Structure}
+
+The project is organised into two ROS2 packages:
+
+\begin{itemize}
+  \item \texttt{catch\_turtle\_interfaces} (\texttt{ament\_cmake}): Defines the custom action interface \texttt{CatchTarget.action}.
+  \item \texttt{catch\_turtle\_bringup} (\texttt{ament\_python}): Contains all Python nodes, launch files, and configuration.
+\end{itemize}
+
+The directory structure is as follows:
+
+\begin{lstlisting}[language={},title={Project Directory Structure}]
+src/
++-- catch_turtle_interfaces/
+|   +-- action/
+|   |   +-- CatchTarget.action
+|   +-- CMakeLists.txt
+|   +-- package.xml
++-- catch_turtle_bringup/
+    +-- catch_turtle_bringup/
+    |   +-- __init__.py
+    |   +-- utils.py
+    |   +-- turtle_registry.py
+    |   +-- spawn_manager.py
+    |   +-- master_manager.py
+    |   +-- catch_executor.py
+    |   +-- follower_manager.py
+    +-- launch/
+    |   +-- catch_turtle.launch.py
+    +-- config/
+    |   +-- params.yaml
+    +-- resource/
+    |   +-- catch_turtle_bringup
+    +-- setup.py
+    +-- package.xml
+\end{lstlisting}
+
+\section{Concurrency Model}
+
+A critical aspect of the architecture is the concurrency model. Two nodes require multi-threaded execution:
+
+\begin{itemize}
+  \item \texttt{catch\_executor} must use \texttt{MultiThreadedExecutor} with \texttt{ReentrantCallbackGroup}, otherwise the long-running Action execute callback would block pose subscriptions, causing the control loop to stall.
+  \item \texttt{master\_manager} similarly requires \texttt{MultiThreadedExecutor} to prevent Action callbacks and timer callbacks from blocking each other during preemption operations.
+  \item The remaining nodes (\texttt{spawn\_manager} and \texttt{follower\_manager}) operate correctly with single-threaded execution.
+\end{itemize}
